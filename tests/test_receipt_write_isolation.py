@@ -129,7 +129,11 @@ class ReceiptWriteIsolationTests(unittest.TestCase):
                 )
 
         self.assertEqual(loaded, ["docker-management"])
-        self.assertEqual(result["context"], "LOADED SKILL: docker-management")
+        self.assertTrue(result["context"].startswith(
+            '[Switchyard: skill "docker-management" already loaded for this turn]\n'
+        ))
+        self.assertIn('do not call skill_view(name="docker-management")', result["context"])
+        self.assertTrue(result["context"].endswith("LOADED SKILL: docker-management"))
         self.assertEqual(result["metadata"]["skill_recommendation"]["status"], "loaded")
         self.assertEqual(self._temporaries(), [])
 
