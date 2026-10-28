@@ -37,11 +37,13 @@ def _revision(receipt: dict[str, Any]) -> str:
 def _event(row: tuple[Any, ...]) -> tuple[float, str | None, str, int]:
     """Classify one skill_view tool result; never return its content."""
     stamp, raw, chars = row
+    if type(stamp) not in (int, float) or not math.isfinite(stamp):
+        return float("-inf"), None, "unknown", 0
     if not isinstance(raw, str) or type(chars) is not int or chars > MAX_RESULT_CHARS:
         return float(stamp), None, "unknown", 0
     try:
         data = json.loads(raw)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return float(stamp), None, "unknown", 0
     if not isinstance(data, dict):
         return float(stamp), None, "unknown", 0

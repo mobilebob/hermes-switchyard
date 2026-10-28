@@ -130,6 +130,16 @@ class DuplicateAuditTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["ambiguous"], 1)
         self.assertEqual(result["metrics"]["full_refetch_rate_pct"], 0.0)
 
+    def test_deeply_nested_tool_result_is_uninspectable_not_a_report_crash(self):
+        nested = "[" * 1500 + "]" * 1500
+        self.add("s1", 10, nested)
+        report = self.report([
+            history(self.base, "s1"),
+            history(self.base + timedelta(seconds=190), "s2"),
+        ])
+        self.assertEqual(report["status"], "partial")
+        self.assertEqual(report["coverage"]["ambiguous"], 1)
+
     def test_missing_session_is_partial(self):
         result = self.report([history(self.base, session="s1"),
                               history(self.base, session="nonexistent")])
