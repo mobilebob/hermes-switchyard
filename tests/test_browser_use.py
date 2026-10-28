@@ -2851,7 +2851,9 @@ class BrowserReliabilityTests(unittest.TestCase):
                 return {"chromium-browser": str(wrapper), "chromium": str(native)}.get(name)
 
             hidden = {"PROGRAMFILES": "", "PROGRAMFILES(X86)": "", "LOCALAPPDATA": ""}
-            with mock.patch.dict(os.environ, hidden, clear=False), mock.patch.object(browser_use.shutil, "which", side_effect=which):
+            with mock.patch.dict(os.environ, hidden, clear=False), mock.patch.object(
+                browser_use.shutil, "which", side_effect=which
+            ), mock.patch.object(browser_use, "_playwright_candidates", return_value=[]):
                 path, family, confinement = browser_use._browser_binary_details()
             self.assertEqual(path, native)
             self.assertEqual(family, "chromium")
@@ -2859,10 +2861,33 @@ class BrowserReliabilityTests(unittest.TestCase):
 
             def only_wrapper(name):
                 return str(wrapper) if name == "chromium-browser" else None
-            with mock.patch.dict(os.environ, hidden, clear=False), mock.patch.object(browser_use.shutil, "which", side_effect=only_wrapper):
+            with mock.patch.dict(os.environ, hidden, clear=False), mock.patch.object(
+                browser_use.shutil, "which", side_effect=only_wrapper
+            ), mock.patch.object(browser_use, "_playwright_candidates", return_value=[]):
                 path, family, confinement = browser_use._browser_binary_details()
             self.assertEqual(path, wrapper)
             self.assertEqual(confinement, "snap")
+
+    def test_bundled_playwright_browser_precedes_a_snap_only_wrapper(self):
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            wrapper = base / "chromium-browser"
+            wrapper.write_text('#!/bin/sh\nexec snap run chromium "$@"\n', encoding="utf-8")
+            bundled = base / "ms-playwright" / "chromium-1234" / "chrome-linux64" / "chrome"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(b"\\x7fELF\\x02\\x01\\x01\\x00binary")
+
+            with mock.patch.dict(
+                os.environ, {"PROGRAMFILES": "", "PROGRAMFILES(X86)": "", "LOCALAPPDATA": ""}, clear=False
+            ), mock.patch.object(
+                browser_use.shutil, "which", side_effect=lambda name: str(wrapper) if name == "chromium-browser" else None
+            ), mock.patch.object(
+                browser_use, "_playwright_candidates", return_value=[bundled]
+            ):
+                path, family, confinement = browser_use._browser_binary_details()
+            self.assertEqual(path, bundled)
+            self.assertEqual(family, "chromium")
+            self.assertEqual(confinement, "none")
 
     def test_snap_confined_profile_lives_in_the_snap_area_and_cleans_up_exactly(self):
         if os.name == "nt":
