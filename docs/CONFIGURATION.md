@@ -44,6 +44,14 @@ An empty string (`""`) or empty list (`[]`) means "nothing configured." The defa
 
 API keys are **not** settings. Save them with `hermes switchyard setup --provider typesafe` (or `openrouter`), which uses a masked prompt.
 
+For the direct TypeSafe `jev-latest` alias, Switchyard accepts strictly formatted
+`jev-MAJOR.MINOR[.PATCH]` response versions from 1.13 onward, including future
+major releases. Previously unseen versions produce a bounded once-per-process
+warning. Explicitly pinned TypeSafe models and OpenRouter models still require
+an allowed exact model; unrelated names, malformed versions, and invalid answer
+schemas are rejected. This compatibility rule does not guarantee that future
+model behavior will be equivalent to the current release.
+
 ## Adaptive reasoning effort
 
 Lets Jev lower your `/reasoning` level on routine turns. Full guide: [ADAPTIVE-REASONING-EFFORT.md](ADAPTIVE-REASONING-EFFORT.md).

@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import math
+import re
 import ssl
 import threading
 import time
@@ -35,6 +36,14 @@ TYPESAFE_MODELS = frozenset({"jev-latest", "jev-1.13", "jev-1.13.0", "jev-1.14",
 ALLOWED_ENDPOINTS = frozenset({DEFAULT_ENDPOINT, TYPESAFE_ENDPOINT})
 ALLOWED_MODELS = OPENROUTER_MODELS | TYPESAFE_MODELS
 EXPECTED_MODEL = "typesafe/jev-1.13"
+# jev-latest may resolve to future TypeSafe releases. Keep the response
+# grammar narrow, independent of the allowlist for explicitly requested models.
+_TYPESAFE_RELEASE_RE = re.compile(
+    r"jev-([1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})(?:\\.(0|[1-9][0-9]{0,3}))?"
+)
+MAX_NEW_TYPESAFE_RELEASE_LOGS = 16
+_NEW_TYPESAFE_RELEASE_LOCK = threading.Lock()
+_NEW_TYPESAFE_RELEASES_LOGGED: set[str] = set()
 MAX_QUESTIONS_PER_REQUEST = 255
 MAX_REQUEST_BYTES = 96_000
 MAX_RESPONSE_BYTES = 1_048_576
@@ -414,6 +423,30 @@ def _require_public_data_ack(acknowledged: bool = True) -> None:
         raise PermissionError(
             "public_or_sanitized_data_ack is false; this call was refused"
         )
+
+
+def _valid_typesafe_latest_resolution(model: Any) -> bool:
+    """Allow only known aliases or bounded Jev numeric releases >= 1.13."""
+    if type(model) is not str:
+        return False
+    if model == "jev-latest":
+        return True
+    match = _TYPESAFE_RELEASE_RE.fullmatch(model)
+    if match is None:
+        return False
+    return (int(match.group(1)), int(match.group(2))) >= (1, 13)
+
+
+def _log_new_typesafe_release_once(model: str) -> None:
+    """Log a validated new model name once per process, with a fixed memory cap."""
+    with _NEW_TYPESAFE_RELEASE_LOCK:
+        if (
+            model in _NEW_TYPESAFE_RELEASES_LOGGED
+            or len(_NEW_TYPESAFE_RELEASES_LOGGED) >= MAX_NEW_TYPESAFE_RELEASE_LOGS
+        ):
+            return
+        _NEW_TYPESAFE_RELEASES_LOGGED.add(model)
+    logger.warning("TypeSafe jev-latest resolved to newly observed release %s", model)
 
 
 def _valid_model_slug(model: Any, endpoint: str | None = None) -> bool:
@@ -837,13 +870,17 @@ class DecisionClient:
         return _strip_response_controls(result)
 
     def _validate_resolved_model(self, resolved: Any) -> str:
+        if self.endpoint == TYPESAFE_ENDPOINT and self.model == "jev-latest":
+            if not _valid_typesafe_latest_resolution(resolved):
+                raise ValueError("Jev provider resolved a model outside the allowed aliases")
+            if resolved not in TYPESAFE_MODELS:
+                _log_new_typesafe_release_once(resolved)
+            return resolved
         if not _valid_model_slug(resolved, self.endpoint):
             raise ValueError("Jev provider resolved a model outside the allowed aliases")
-        # Aliases may resolve to a dated/concrete release, but an explicitly
-        # pinned model must resolve exactly to that model.
+        # OpenRouter's pinned default may resolve to its known concrete alias;
+        # all explicitly selected TypeSafe model versions stay exact-match.
         if self.endpoint == DEFAULT_ENDPOINT and self.model == EXPECTED_MODEL and resolved in OPENROUTER_MODELS:
-            return resolved
-        if self.endpoint == TYPESAFE_ENDPOINT and self.model == "jev-latest" and resolved in TYPESAFE_MODELS:
             return resolved
         if resolved != self.model:
             raise ValueError("Jev provider resolved a different allowed alias")
