@@ -1218,6 +1218,16 @@ def _cli_handler(args):
         indent = None if getattr(args, "json_output", False) else 2
         print(json.dumps(stats, ensure_ascii=False, sort_keys=True, indent=indent, allow_nan=False))
         return 0
+    if command == "skill-duplicates":
+        from .skill_duplicates import build_report, format_text
+
+        if not 1 <= args.days <= 3650:
+            print("--days requires an integer between 1 and 3650.")
+            return 2
+        report = build_report(days=args.days)
+        print(json.dumps(report, sort_keys=True, allow_nan=False)
+              if getattr(args, "json_output", False) else format_text(report))
+        return 1 if report["status"] == "unavailable" else 0
     if command == "wow":
         from .wow import build_report, format_text
 
@@ -1278,7 +1288,7 @@ def _cli_handler(args):
     if command != "setup":
 
         print(
-            "Usage: hermes switchyard <status|cleanup|guide|setup|ensure-toolsets|receipt|stats|wow|test> "
+            "Usage: hermes switchyard <status|cleanup|guide|setup|ensure-toolsets|receipt|stats|wow|skill-duplicates|test> "
             "[--provider ...|--json]"
         )
         return 2
@@ -1364,6 +1374,11 @@ def _setup_cli(parser):
         help="Only count records newer than this window, e.g. 30m, 24h, 7d, or 2w",
     )
     stats.add_argument("--json", action="store_true", dest="json_output", help="Emit compact JSON")
+    duplicates = commands.add_parser(
+        "skill-duplicates", help="Read-only audit of repeated skill_view reads after automatic loads"
+    )
+    duplicates.add_argument("--days", type=int, default=7, metavar="N", help="Trailing days (1-3650)")
+    duplicates.add_argument("--json", action="store_true", dest="json_output", help="Emit JSON counts only")
     wow = commands.add_parser("wow", help="Summarize retained local observations only")
     wow.add_argument("--days", type=int, default=7, metavar="N", help="Trailing whole days (default: 7)")
     wow.add_argument("--json", action="store_true", dest="json_output", help="Emit schema-versioned JSON")

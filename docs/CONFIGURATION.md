@@ -68,6 +68,31 @@ Lets Jev lower your `/reasoning` level on routine turns. Full guide: [ADAPTIVE-R
 | `adaptive_reasoning_effort_deadline_seconds` | `0.4` | How long to wait for Jev, from 0.1 to 1.5 seconds. On timeout, your level is sent unchanged. |
 | `adaptive_reasoning_effort_default` | `medium` | Deprecated and unused since 0.5.4. |
 
+## Read-only duplicate skill loading audit
+
+Run `hermes switchyard skill-duplicates --days 7` for a local report, or add
+`--json` for the closed-schema counters. No provider requests are made and no
+configuration changes or transcript writes are performed.
+
+The audit correlates retained successful automatic skill-load receipts with
+`skill_view` tool responses in the same Hermes `state.db` session, starting
+at the receipt timestamp and ending at the next recorded turn or 120 seconds.
+It distinguishes complete SKILL.md re-reads from Hermes' `unchanged` dedup
+stubs and excludes linked reference-file reads. The report includes coverage,
+unknown/pending matches, approximate extra tool-result characters and a rough
+**4 characters per token** conversion, grouped by recorded Switchyard source
+SHA for before/after comparisons. It never prints a skill name, session ID,
+tool result text, prompt, or database path.
+
+**Limits:** This is observational, not a direct host dedup counter: timestamps
+have one-second precision, session IDs must match between receipts and
+`state.db`, and transcript retention/rewinds can hide calls. Unrecognized
+results, missing sessions, and unfinished windows are excluded from the
+denominator and flagged. Rates and token estimates are not measured billing
+or proof of causal improvement. Only the last retained receipts (normally up
+to 500 records) are available. A zero without verified coverage is not
+reported as success.
+
 ## Automatic skill routing: everyday settings
 
 Picks and loads a matching skill at the start of a turn. Full guides: [setup](AUTOMATIC-SETUP.md) and [how it works](AUTOMATIC-INTEGRATION.md).
