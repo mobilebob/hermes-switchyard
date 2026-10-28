@@ -76,7 +76,7 @@ Picks and loads a matching skill at the start of a turn. Full guides: [setup](AU
 | --- | --- | --- |
 | `automatic_skill_recommendation` | `true` | Master switch for automatic skill routing. |
 | `automatic_skill_routing_mode` | `hosted_sanitized` | `hosted_sanitized` may ask Jev: after a local privacy scan when Hermes supplies no policy for the turn, or directly (redacted, not re-scanned) when Hermes authorizes the text. `local_only` uses only on-device matching, and `off` disables routing. |
-| `automatic_skill_consumer_mode` | `load` | `load` loads the chosen skill through Hermes' normal loader. `advisory` only adds a suggestion to the context, and never calls Jev. |
+| `automatic_skill_consumer_mode` | `load` | `load` loads the chosen skill through Hermes' normal loader and labels the injected instructions as already loaded, so the model can avoid a redundant `skill_view` call. This does **not** update Hermes' repeat-view tracker or guarantee deduplication; `advisory` only suggests a skill and never calls Jev. |
 | `automatic_skill_public_or_sanitized_data_ack` | `true` | Your standing agreement that turns sent for hosted routing are public or sanitized. `false` stops hosted routing. This is not a data classifier. |
 | `automatic_skill_candidates` | `[]` | Empty uses every skill in the active profile. Otherwise, an explicit list of names or `{name, description}` objects to choose from. |
 | `automatic_skill_mandatory_skills` | `[]` | Exact skill IDs that an automatic load must never displace. A conflicting pick is recorded as `mandatory_conflict` and not loaded. |

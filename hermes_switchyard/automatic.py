@@ -1818,6 +1818,24 @@ def _mark_persist_failure(metadata: dict[str, Any], failed: bool) -> None:
         metadata.pop(RECEIPT_PERSIST_FAILED_KEY, None)
 
 
+def _format_preloaded_skill(name: str, content: str) -> str:
+    """Mark a confirmed skill load in context; do not claim host-side dedup.
+
+    The tool handler's repeat-view tracker does not observe direct skill_view()
+    calls on supported Hermes hosts. This marker tells the model it already has
+    the instructions while leaving manual refreshes possible.
+    """
+    literal = json.dumps(name, ensure_ascii=True)
+    return (
+        f"[Switchyard: skill {literal} already loaded for this turn]\n"
+        "Hermes has already loaded this skill through skill_view. "
+        f"Use the instructions below directly; do not call skill_view(name={literal}) "
+        "again merely to load the same skill. Call it only if you need to refresh "
+        "or verify the content.\n\n"
+        f"{content}"
+    )
+
+
 def build_pre_llm_call_hook(
     *,
     enabled: bool = True,
@@ -2216,7 +2234,11 @@ def build_pre_llm_call_hook(
                 response = {"metadata": metadata}
             else:
                 response = {
-                    "context": loaded_context or _format_recommendation(selected),
+                    "context": (
+                        _format_preloaded_skill(selected, loaded_context)
+                        if loaded_once
+                        else _format_recommendation(selected)
+                    ),
                     "metadata": metadata,
                 }
         # The routing snapshots were taken before the final receipt save.
