@@ -31,7 +31,7 @@ OPENROUTER_APP_HEADERS = {
     "X-OpenRouter-Categories": "personal-agent,cli-agent",
 }
 OPENROUTER_MODELS = frozenset({"typesafe/jev-1.13", "typesafe/jev-1.13-20260917"})
-TYPESAFE_MODELS = frozenset({"jev-latest", "jev-1.13", "jev-1.13.0"})
+TYPESAFE_MODELS = frozenset({"jev-latest", "jev-1.13", "jev-1.13.0", "jev-1.14", "jev-1.14.0"})
 ALLOWED_ENDPOINTS = frozenset({DEFAULT_ENDPOINT, TYPESAFE_ENDPOINT})
 ALLOWED_MODELS = OPENROUTER_MODELS | TYPESAFE_MODELS
 EXPECTED_MODEL = "typesafe/jev-1.13"
