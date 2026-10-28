@@ -39,7 +39,7 @@ EXPECTED_MODEL = "typesafe/jev-1.13"
 # jev-latest may resolve to future TypeSafe releases. Keep the response
 # grammar narrow, independent of the allowlist for explicitly requested models.
 _TYPESAFE_RELEASE_RE = re.compile(
-    r"jev-([1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})(?:\\.(0|[1-9][0-9]{0,3}))?"
+    r"jev-([1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})(?:\.(0|[1-9][0-9]{0,3}))?"
 )
 MAX_NEW_TYPESAFE_RELEASE_LOGS = 16
 _NEW_TYPESAFE_RELEASE_LOCK = threading.Lock()
