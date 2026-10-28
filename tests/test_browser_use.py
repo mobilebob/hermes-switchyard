@@ -2875,7 +2875,7 @@ class BrowserReliabilityTests(unittest.TestCase):
             wrapper.write_text('#!/bin/sh\nexec snap run chromium "$@"\n', encoding="utf-8")
             bundled = base / "ms-playwright" / "chromium-1234" / "chrome-linux64" / "chrome"
             bundled.parent.mkdir(parents=True)
-            bundled.write_bytes(b"\\x7fELF\\x02\\x01\\x01\\x00binary")
+            bundled.write_bytes(b"\x7fELF\x02\x01\x01\x00binary")
 
             with mock.patch.dict(
                 os.environ, {"PROGRAMFILES": "", "PROGRAMFILES(X86)": "", "LOCALAPPDATA": ""}, clear=False
