@@ -256,19 +256,32 @@ class AutomaticRecommendationTests(HermesHomeTestCase):
         self.assertNotIn("[Switchyard:", body)
 
     def test_preload_marker_requires_a_successful_load(self):
-        candidates = [{"name": "docker-management", "description": "Manage Docker containers."}]
+        # Exercise the loader boundary using a routing fixture already proven
+        # to select docker-management; an abstention never reaches the loader.
+        candidates = [
+            {"name": "docker-management", "description": "Manage Docker containers and Compose services."},
+            {"name": "network-printer-operations", "description": "Operate network printers and scanners."},
+        ]
+        task = "Diagnose an exiting Docker Compose container"
+        attempted = []
+
+        def failing_loader(name, task_id=None):
+            attempted.append((name, task_id))
+            raise RuntimeError("synthetic loader failure")
+
         failure = build_pre_llm_call_hook(
             configured_candidates=candidates,
             routing_mode="local_only",
             consumer_mode="load",
-            skill_loader=lambda name, task_id=None: (_ for _ in ()).throw(RuntimeError("unavailable")),
+            skill_loader=failing_loader,
         )
         assert failure is not None
         failed_result = failure(
-            user_message="Diagnose a Docker container that exits unexpectedly",
+            user_message=task,
             session_id="load-failed-session",
             turn_id="load-failed-turn",
         )
+        self.assertEqual(attempted, [("docker-management", "load-failed-session")])
         self.assertEqual(failed_result["metadata"]["skill_recommendation"]["status"], "load_failed")
         self.assertNotIn("already loaded for this turn", failed_result["context"])
         self.assertEqual(failure.last_receipt["outcome_status"], "unverified")
@@ -280,7 +293,7 @@ class AutomaticRecommendationTests(HermesHomeTestCase):
         )
         assert advisory is not None
         suggestion = advisory(
-            user_message="Diagnose a Docker container that exits unexpectedly",
+            user_message=task,
             session_id="advisory-session",
             turn_id="advisory-turn",
         )
