@@ -34,31 +34,33 @@ def _revision(receipt: dict[str, Any]) -> str:
     return sha if isinstance(sha, str) and _SHA_RE.fullmatch(sha) else "unavailable"
 
 
-def _event(row: tuple[Any, ...]) -> tuple[float, str | None, str, int]:
-    """Classify one skill_view tool result; never return its content."""
+def _event(row: tuple[Any, ...]) -> tuple[float, str | None, str, int, str | None]:
+    """Classify a tool result using fixed diagnostic codes, never its content."""
     stamp, raw, chars = row
     if type(stamp) not in (int, float) or not math.isfinite(stamp):
-        return float("-inf"), None, "unknown", 0
-    if not isinstance(raw, str) or type(chars) is not int or chars > MAX_RESULT_CHARS:
-        return float(stamp), None, "unknown", 0
+        return float("-inf"), None, "unknown", 0, "invalid_tool_timestamp"
+    if not isinstance(raw, str):
+        return float(stamp), None, "unknown", 0, "nontext_tool_result"
+    if type(chars) is not int or chars > MAX_RESULT_CHARS:
+        return float(stamp), None, "unknown", 0, "oversized_tool_result"
     try:
         data = json.loads(raw)
     except (ValueError, TypeError, RecursionError):
-        return float(stamp), None, "unknown", 0
+        return float(stamp), None, "unknown", 0, "invalid_tool_json"
     if not isinstance(data, dict):
-        return float(stamp), None, "unknown", 0
+        return float(stamp), None, "unknown", 0, "nonobject_tool_json"
     name = data.get("name")
     if not isinstance(name, str) or not 0 < len(name) <= 128:
-        return float(stamp), None, "unknown", 0
+        return float(stamp), None, "unknown", 0, "missing_skill_name"
     # Linked references are useful and not redundant copies of SKILL.md.
     if data.get("file") not in (None, "", "SKILL.md"):
-        return float(stamp), name, "linked_file", 0
+        return float(stamp), name, "linked_file", 0, None
     if (data.get("success") is True and data.get("status") == "unchanged"
             and data.get("dedup") is True and data.get("content_returned") is False):
-        return float(stamp), name, "stub", 0
+        return float(stamp), name, "stub", 0, None
     if data.get("success") is True and isinstance(data.get("content"), str):
-        return float(stamp), name, "full", chars
-    return float(stamp), name, "unknown", 0
+        return float(stamp), name, "full", chars, None
+    return float(stamp), name, "unknown", 0, "unrecognized_skill_view_result"
 
 
 def _safe_db_path(db_path: Path) -> bool:
@@ -70,7 +72,7 @@ def _safe_db_path(db_path: Path) -> bool:
 
 
 def _read_session_events(conn: sqlite3.Connection, session: str, start: float,
-                         end: float, active: bool) -> list[tuple[float, str | None, str, int]] | None:
+                         end: float, active: bool) -> list[tuple[float, str | None, str, int, str | None]] | None:
     active_filter = " AND active = 1" if active else ""
     sql = (
         "SELECT timestamp, substr(content, 1, ?), length(content) FROM messages "
@@ -118,6 +120,19 @@ def build_report(*, days: int = 7, now: datetime | None = None,
     preloads = [r for r in valid if r[2].get("consumer_status") == "loaded"
                 and r[2].get("skill_load_verified") is True
                 and isinstance(r[2].get("loaded_skill"), str)]
+    # The CLI process can inspect the installed source, but not assert which
+    # code a separately running gateway has loaded. Keep that distinction
+    # explicit in the report.
+    installed_git_sha = receipt_history.resolve_git_source_sha()
+    local_receipt_sha = receipt_history.resolve_receipt_source_sha()
+    retained_by_revision: dict[str, int] = defaultdict(int)
+    preload_by_revision: dict[str, int] = defaultdict(int)
+    for _, _, receipt in valid:
+        retained_by_revision[_revision(receipt)] += 1
+    for _, _, receipt in preloads:
+        preload_by_revision[_revision(receipt)] += 1
+    latest_receipt = valid[-1] if valid else None
+    latest_preload = preloads[-1] if preloads else None
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "unavailable",
@@ -125,13 +140,55 @@ def build_report(*, days: int = 7, now: datetime | None = None,
         "window": {"days": days, "from": receipt_history.format_timestamp(cutoff),
                    "to": receipt_history.format_timestamp(moment)},
         "coverage": {"retained_receipts": len(valid), "preloaded": len(preloads),
-                     "eligible": 0, "unmatched_sessions": 0, "ambiguous": 0, "pending": 0},
+                     "eligible": 0, "unmatched_sessions": 0, "ambiguous": 0, "pending": 0,
+                     "exclusion_reasons": {}, "eligible_without_skill_view": 0},
         "metrics": {"full_refetch_turns": 0, "full_refetch_calls": 0,
                     "unchanged_stub_turns": 0, "different_skill_turns": 0,
                     "full_refetch_rate_pct": None, "redundant_result_chars": 0,
                     "approx_redundant_tokens": 0},
         "by_revision": {},
-        "limitations": "Exact-name, same-session, up-to-120s observation; ~4 chars/token heuristic, not billed tokens or proven same-turn causality.",
+        "source_identity": {
+            "installed_git_sha": installed_git_sha,
+            "local_receipt_source_sha": local_receipt_sha,
+            "installed_source_consistent": (
+                installed_git_sha == local_receipt_sha
+                if installed_git_sha != "unavailable" and local_receipt_sha != "unavailable"
+                else None
+            ),
+            "latest_retained_receipt_source_sha": (
+                _revision(latest_receipt[2]) if latest_receipt else None
+            ),
+            "latest_retained_receipt_at": (
+                receipt_history.format_timestamp(datetime.fromtimestamp(
+                    latest_receipt[0], tz=timezone.utc
+                )) if latest_receipt else None
+            ),
+            "latest_retained_preload_source_sha": (
+                _revision(latest_preload[2]) if latest_preload else None
+            ),
+            "latest_retained_preload_at": (
+                receipt_history.format_timestamp(datetime.fromtimestamp(
+                    latest_preload[0], tz=timezone.utc
+                )) if latest_preload else None
+            ),
+            "retained_receipts_by_revision": dict(sorted(retained_by_revision.items())),
+            "preloads_by_revision": dict(sorted(preload_by_revision.items())),
+            "receipts_matching_installed_git": (
+                retained_by_revision.get(installed_git_sha, 0)
+                if installed_git_sha != "unavailable" else None
+            ),
+            "preloads_matching_installed_git": (
+                preload_by_revision.get(installed_git_sha, 0)
+                if installed_git_sha != "unavailable" else None
+            ),
+            "gateway_runtime_verified": False,
+        },
+        "limitations": (
+            "Exact-name, same-session, up-to-120s observation; ~4 chars/token heuristic, "
+            "not billed tokens or proven same-turn causality. Installed source identity "
+            "is measured in the CLI process, not the running gateway; new gateway "
+            "receipts are needed for post-change comparison."
+        ),
     }
     if not preloads:
         report["reason"] = "no_retained_preloads"
@@ -152,6 +209,11 @@ def build_report(*, days: int = 7, now: datetime | None = None,
         report["reason"] = "session_limit_exceeded"
         return report
 
+    exclusion_reasons = report["coverage"]["exclusion_reasons"]
+
+    def exclude(reason: str, count: int = 1) -> None:
+        exclusion_reasons[reason] = exclusion_reasons.get(reason, 0) + count
+
     summary: dict[str, dict[str, int]] = defaultdict(lambda: {
         "eligible": 0, "full_refetch_turns": 0, "full_refetch_calls": 0,
         "unchanged_stub_turns": 0, "different_skill_turns": 0,
@@ -169,6 +231,7 @@ def build_report(*, days: int = 7, now: datetime | None = None,
                 if not conn.execute("SELECT 1 FROM sessions WHERE id = ? LIMIT 1", (sid,)).fetchone():
                     count = sum(1 for _, s, _ in preloads if s == sid)
                     report["coverage"]["unmatched_sessions"] += count
+                    exclude("session_absent_from_state_db", count)
                     incomplete = True
                     continue
                 all_turns = groups[sid]
@@ -176,9 +239,9 @@ def build_report(*, days: int = 7, now: datetime | None = None,
                 end = min(moment.timestamp() + 0.001, all_turns[-1][0] + MAX_WINDOW_SECONDS + 0.001)
                 events = _read_session_events(conn, sid, start, end, has_active)
                 if events is None:
-                    report["coverage"]["ambiguous"] += sum(
-                        1 for _, s, _ in preloads if s == sid
-                    )
+                    count = sum(1 for _, s, _ in preloads if s == sid)
+                    report["coverage"]["ambiguous"] += count
+                    exclude("session_event_limit_exceeded", count)
                     incomplete = True
                     continue
                 for i, (stamp, _, receipt) in enumerate(all_turns):
@@ -189,19 +252,26 @@ def build_report(*, days: int = 7, now: datetime | None = None,
                     next_stamp = all_turns[i + 1][0] if i + 1 < len(all_turns) else None
                     if next_stamp is None and moment.timestamp() - stamp < MAX_WINDOW_SECONDS:
                         report["coverage"]["pending"] += 1
+                        exclude("pending_120s_window")
                         incomplete = True
                         continue
                     stop = min(stamp + MAX_WINDOW_SECONDS, next_stamp if next_stamp is not None else float("inf"))
                     if stop <= stamp:
                         report["coverage"]["ambiguous"] += 1
+                        exclude("overlapping_or_same_second_receipts")
                         incomplete = True
                         continue
                     relevant = [event for event in events if stamp <= event[0] < stop
                                 and event[2] != "linked_file"]
-                    if any(event[2] == "unknown" for event in relevant):
+                    first_unknown = next((event for event in relevant
+                                          if event[2] == "unknown"), None)
+                    if first_unknown is not None:
                         report["coverage"]["ambiguous"] += 1
+                        exclude(first_unknown[4] or "unrecognized_skill_view_result")
                         incomplete = True
                         continue
+                    if not relevant:
+                        report["coverage"]["eligible_without_skill_view"] += 1
                     selected = receipt["loaded_skill"]
                     matching = [e for e in relevant if e[1] == selected]
                     full = [e for e in matching if e[2] == "full"]
@@ -219,8 +289,10 @@ def build_report(*, days: int = 7, now: datetime | None = None,
         report["reason"] = "state_db_read_failed"
         return report
 
-    report["coverage"]["unmatched_sessions"] += sum(1 for _, sid, _ in preloads if sid is None)
-    if report["coverage"]["unmatched_sessions"]:
+    missing_ids = sum(1 for _, sid, _ in preloads if sid is None)
+    report["coverage"]["unmatched_sessions"] += missing_ids
+    if missing_ids:
+        exclude("receipt_session_id_missing", missing_ids)
         incomplete = True
     aggregate = report["metrics"]
     for revision, bucket in sorted(summary.items()):
@@ -252,6 +324,32 @@ def format_text(report: dict[str, Any]) -> str:
         f"unmatched: {coverage['unmatched_sessions']} | ambiguous: {coverage['ambiguous']} | "
         f"pending: {coverage['pending']}",
     ]
+    source = report["source_identity"]
+    lines.append(
+        f"Installed Git SHA: {source['installed_git_sha'][:12]} | "
+        f"CLI receipt SHA: {source['local_receipt_source_sha'][:12]} | "
+        f"receipts/preloads at installed SHA: "
+        f"{source['receipts_matching_installed_git']}/"
+        f"{source['preloads_matching_installed_git']}"
+    )
+    if source["latest_retained_receipt_at"] is not None:
+        lines.append(
+            "Latest retained receipt: "
+            f"{source['latest_retained_receipt_at']} "
+            f"(source {source['latest_retained_receipt_source_sha'][:12]})"
+        )
+    if source["latest_retained_preload_at"] is not None:
+        lines.append(
+            "Latest retained preload: "
+            f"{source['latest_retained_preload_at']} "
+            f"(source {source['latest_retained_preload_source_sha'][:12]})"
+        )
+    if coverage["exclusion_reasons"]:
+        lines.append("Exclusions: " + ", ".join(
+            f"{reason}={count}"
+            for reason, count in sorted(coverage["exclusion_reasons"].items())
+        ))
+    lines.append(f"Eligible with no skill_view result: {coverage['eligible_without_skill_view']}")
     if report["status"] == "unavailable":
         lines.append(f"Unavailable: {report['reason']}")
     else:

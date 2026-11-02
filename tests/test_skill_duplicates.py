@@ -97,6 +97,11 @@ class DuplicateAuditTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["redundant_result_chars"], len(full))
         self.assertEqual(result["by_revision"][A]["full_refetch_turns"], 1)
         self.assertEqual(result["by_revision"][B]["eligible"], 2)
+        self.assertEqual(result["source_identity"]["preloads_by_revision"], {A: 1, B: 2})
+        self.assertEqual(result["source_identity"]["retained_receipts_by_revision"], {A: 1, B: 2})
+        self.assertEqual(result["source_identity"]["latest_retained_preload_source_sha"], B)
+        self.assertEqual(result["coverage"]["eligible_without_skill_view"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {})
         self.assertNotIn("SYNTHETIC_PRIVATE_PAYLOAD", json.dumps(result))
         self.assertNotIn(str(self.db), format_text(result))
         self.assertNotIn("docker-management", format_text(result))
@@ -128,6 +133,7 @@ class DuplicateAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["coverage"]["eligible"], 1)
         self.assertEqual(result["coverage"]["ambiguous"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {"invalid_tool_json": 1})
         self.assertEqual(result["metrics"]["full_refetch_rate_pct"], 0.0)
 
     def test_deeply_nested_tool_result_is_uninspectable_not_a_report_crash(self):
@@ -145,6 +151,9 @@ class DuplicateAuditTests(unittest.TestCase):
                               history(self.base, session="nonexistent")])
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["coverage"]["unmatched_sessions"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {
+            "session_absent_from_state_db": 1,
+        })
         self.assertEqual(result["coverage"]["eligible"], 1)
 
     def test_inactive_result_is_not_counted(self):
@@ -158,6 +167,109 @@ class DuplicateAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["reason"], "no_attributable_windows")
         self.assertEqual(result["coverage"]["pending"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {
+            "pending_120s_window": 1,
+        })
+
+
+    def test_installed_source_diagnostic_is_cli_only_and_counts_all_preloads(self):
+        from unittest import mock
+        with mock.patch.object(receipt_history, "resolve_git_source_sha", return_value=A), \
+             mock.patch.object(receipt_history, "resolve_receipt_source_sha", return_value=A):
+            result = self.report([history(self.base, "s1", sha=A),
+                                  history(self.base + timedelta(seconds=130), "s2", sha=B)])
+        identity = result["source_identity"]
+        self.assertEqual(identity["installed_git_sha"], A)
+        self.assertEqual(identity["local_receipt_source_sha"], A)
+        self.assertTrue(identity["installed_source_consistent"])
+        self.assertEqual(identity["preloads_matching_installed_git"], 1)
+        self.assertEqual(identity["preloads_by_revision"], {A: 1, B: 1})
+        self.assertEqual(identity["retained_receipts_by_revision"], {A: 1, B: 1})
+        self.assertEqual(identity["receipts_matching_installed_git"], 1)
+        self.assertEqual(identity["latest_retained_receipt_source_sha"], B)
+        self.assertEqual(identity["latest_retained_preload_source_sha"], B)
+        self.assertFalse(identity["gateway_runtime_verified"])
+        self.assertIn("CLI process", result["limitations"])
+        self.assertNotIn("docker-management", json.dumps(result))
+
+    def test_source_mismatch_does_not_claim_a_gateway_revision(self):
+        from unittest import mock
+        with mock.patch.object(receipt_history, "resolve_git_source_sha", return_value=B), \
+             mock.patch.object(receipt_history, "resolve_receipt_source_sha", return_value=A):
+            result = self.report([history(self.base, "s1", sha=A)])
+        self.assertFalse(result["source_identity"]["installed_source_consistent"])
+        self.assertEqual(result["source_identity"]["preloads_matching_installed_git"], 0)
+        self.assertEqual(result["source_identity"]["preloads_by_revision"], {A: 1})
+        self.assertFalse(result["source_identity"]["gateway_runtime_verified"])
+        self.assertIn("receipts/preloads at installed SHA: 0/0", format_text(result))
+
+    def test_newer_nonpreload_receipts_show_gateway_revision_observations(self):
+        from unittest import mock
+        old_preload = history(self.base, "s1", sha=A)
+        newest_decision = history(self.base + timedelta(seconds=200), "s1", skill=None, sha=B)
+        with mock.patch.object(receipt_history, "resolve_git_source_sha", return_value=B), \
+             mock.patch.object(receipt_history, "resolve_receipt_source_sha", return_value=B):
+            report = self.report([old_preload, newest_decision])
+        identity = report["source_identity"]
+        self.assertEqual(identity["retained_receipts_by_revision"], {A: 1, B: 1})
+        self.assertEqual(identity["preloads_by_revision"], {A: 1})
+        self.assertEqual(identity["receipts_matching_installed_git"], 1)
+        self.assertEqual(identity["preloads_matching_installed_git"], 0)
+        self.assertEqual(identity["latest_retained_receipt_source_sha"], B)
+        self.assertEqual(identity["latest_retained_preload_source_sha"], A)
+        self.assertFalse(identity["gateway_runtime_verified"])
+
+    def test_exclusion_reason_for_unparseable_name_and_unsupported_result(self):
+        self.add("s1", 10, json.dumps({"success": True, "content": "secret"}))
+        self.add("s2", 10, json.dumps({"name": "docker-management", "success": False}))
+        result = self.report([history(self.base, "s1"), history(self.base, "s2")])
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["coverage"]["ambiguous"], 2)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {
+            "missing_skill_name": 1,
+            "unrecognized_skill_view_result": 1,
+        })
+        self.assertEqual(result["metrics"]["full_refetch_rate_pct"], None)
+
+    def test_same_second_receipts_are_flagged_not_counted(self):
+        receipts = [history(self.base, "s1"), history(self.base, "s1")]
+        result = self.report(receipts)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["coverage"]["ambiguous"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {
+            "overlapping_or_same_second_receipts": 1,
+        })
+        self.assertEqual(result["coverage"]["eligible"], 1)
+
+    def test_missing_receipt_session_id_is_an_exclusion(self):
+        item = history(self.base, "s1")
+        item["session_id"] = None
+        result = self.report([item, history(self.base, "s2")])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["coverage"]["unmatched_sessions"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {
+            "receipt_session_id_missing": 1,
+        })
+
+    def test_oversized_result_is_reported_without_exposing_text(self):
+        private = "SYNTHETIC_PRIVATE_STRING"
+        self.add("s1", 5, payload(sensitive=private * 9000))
+        report = self.report([history(self.base, "s1")])
+        self.assertEqual(report["coverage"]["exclusion_reasons"], {
+            "oversized_tool_result": 1,
+        })
+        self.assertNotIn(private, json.dumps(report))
+        self.assertEqual(report["status"], "unavailable")
+
+    def test_session_event_scan_limit_is_an_exclusion(self):
+        from unittest import mock
+        from hermes_switchyard import skill_duplicates
+        with mock.patch.object(skill_duplicates, "_read_session_events", return_value=None):
+            result = self.report([history(self.base, "s1")])
+        self.assertEqual(result["coverage"]["ambiguous"], 1)
+        self.assertEqual(result["coverage"]["exclusion_reasons"], {
+            "session_event_limit_exceeded": 1,
+        })
 
     def test_unavailable_db_is_not_an_empty_transcript(self):
         report = build_report(

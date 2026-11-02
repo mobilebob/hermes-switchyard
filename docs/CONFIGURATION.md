@@ -84,6 +84,25 @@ unknown/pending matches, approximate extra tool-result characters and a rough
 SHA for before/after comparisons. It never prints a skill name, session ID,
 tool result text, prompt, or database path.
 
+**Diagnostic coverage:** Both text and JSON reports count exclusions
+by fixed, non-sensitive reason codes (malformed/oversized results, missing
+session identifiers, absent sessions, scan limits, colliding timestamps,
+pending windows), plus eligible windows with no applicable SKILL.md `skill_view` result.
+This distinguishes unusable evidence from an observed zero; it never prints
+the excluded transcript or skill name. The `source_identity` section shows
+the installed checkout Git SHA, the CLI's local receipt-source SHA, counts
+of **all retained routing receipts and successful preloads** by recorded
+source SHA (including excluded ones), plus their latest timestamps. If newer
+receipts are present but newer preloads are absent, this is not proof of a
+routing failure: no eligible skill might have been selected. If the two local SHAs differ,
+inspect the release manifest/source identity; do not relabel old receipts.
+These identity checks **do not prove the running gateway's code revision**.
+For a post-improvement comparison, verify an updated gateway separately,
+then use normal task activity to create new automatic preload receipts. Run
+the audit after its 120-second observation window closes, and compare
+eligible samples by source SHA and coverage. The audit never triggers tasks,
+a gateway restart, or a skill load.
+
 **Limits:** This is observational, not a direct host dedup counter: timestamps
 have one-second precision, session IDs must match between receipts and
 `state.db`, and transcript retention/rewinds can hide calls. Unrecognized
