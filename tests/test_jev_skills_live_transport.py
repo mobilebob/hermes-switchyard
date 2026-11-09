@@ -78,7 +78,9 @@ class LiveTransportTests(unittest.TestCase):
     def test_public_price_estimate_is_not_enforceable_billing_proof(self):
         for changes in ({"rate_micro_usd_per_million": 42001}, {"output_free": False},
                         {"no_other_fees": False}, {"billable_input_token_ceiling": 65536},
-                        {"pricing_reference": ""}):
+                        {"pricing_reference": ""},
+                        {"owner_waived_hard_spend_ceiling": True},
+                        {"owner_waived_hard_spend_ceiling": True, "price_ceiling_verified": False}):
             with self.subTest(changes=changes), self.assertRaises(mod.Blocked):
                 mod.validate_prerequisites(proof(**changes))
 

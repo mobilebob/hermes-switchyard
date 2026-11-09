@@ -62,6 +62,31 @@ persistent unique case/arm reservation. Tests cover constructor/connect-path,
 request-write, response-header, body-read and close failures, plus 302/429/529,
 crashes, failed accounting writes and concurrent consumers.
 
+## Credential-free native request capture
+
+`live_worker.py` accepts only the unchanged frozen public task text and the
+owner-approved `openai-codex:gpt-6.1-sol` / `openai-codex:gpt-6-luna` pair. It
+verifies the exact clean source pin before loading the decision library, then
+denies network/process operations and uses parent stdin/stdout IPC for native
+transport requests. It has no real API credential or direct HTTP path. Private
+and no-text cases are refused before source loading. Candidate descriptions and
+reference price ordering are code-owned public metadata; the 4096-token context
+floor is an evaluation budget, not a full advertised model limit, and reference
+prices are not claimed to be Codex account billing.
+
+Offline capture exercised all 12 cases in both arms: 20 native request bodies
+and four local privacy exclusions, with no external requests. Every captured
+body passed the fixed model/shape/size/field guards and exact frozen task check;
+both arms received the same candidate IDs and task text. Questions and policy
+APIs remain implementation-specific. Captured bodies are preparation evidence,
+not observed model decisions or an active live trial driver.
+
+The active authorization retains the USD 0.50 ceiling. Stale spending-waiver
+flags are explicitly rejected, and price verification cannot be bypassed by an
+approval JSON flag. The interrupted draft was preserved outside the repository
+before that correction. Authentication can still be established on the first
+reserved request once every remaining gate passes.
+
 ## Persistent accounting and monetary assumptions
 
 SQLite uses `BEGIN IMMEDIATE` and `synchronous=FULL`; the request intent commits

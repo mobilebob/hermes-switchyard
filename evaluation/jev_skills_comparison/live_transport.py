@@ -71,6 +71,8 @@ def authentication_ready_or_bootstrap(proof: dict) -> bool:
 
 def validate_prerequisites(proof: dict) -> None:
     required = ("model_allowlist_verified", "public_payloads_verified", "price_ceiling_verified")
+    if isinstance(proof, dict) and proof.get("owner_waived_hard_spend_ceiling") is True:
+        raise Blocked("spend_ceiling_waiver_not_allowed")
     if (not isinstance(proof, dict) or any(proof.get(k) is not True for k in required)
             or not authentication_ready_or_bootstrap(proof)):
         raise Blocked("unverified_live_prerequisites")
