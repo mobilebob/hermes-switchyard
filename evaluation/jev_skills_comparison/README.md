@@ -132,6 +132,15 @@ collector receipt. `promotion_authorized` is always false.
 Generated manifests, observations and logs belong outside the repository. See
 [Stage A findings](STAGE_A.md) for actual execution results and remaining limits.
 
+## Isolated live transport preparation
+
+The separate [live preparation guide](LIVE_PREPARATION.md) describes the fixed
+TypeSafe broker, exact public-payload gate, durable shared request/spend ledger,
+no-retry adapters and first-reserved-request authentication. These modules do
+not add a live flag to `collect.py` or activate a trial. An approved budget and
+an available credential are not substitutes for an approved real candidate
+allowlist, verified outbound bodies and an enforceable monetary bound.
+
 ## Stage B: memory filtering
 
 Compare Jev Skills memory filtering to Switchyard's session-search rerank as distinct features. Use fake passages containing known facts and planted instructions. Measure fact recall, unsafe instruction promotion, benign loss, coverage, latency, egress and fallback. Do not send customer memory to Jev.
