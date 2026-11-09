@@ -89,6 +89,8 @@ RELEASE_FILES = (
     "hermes_switchyard/receipt_history.py",
     "hermes_switchyard/receipt_output.py",
     "hermes_switchyard/receipt_state.py",
+    "hermes_switchyard/runtime_provenance.py",
+    "hermes_switchyard/usage_ledger.py",
     "hermes_switchyard/record_triage.py",
     "hermes_switchyard/client.py",
     "hermes_switchyard/source_find.py",

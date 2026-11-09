@@ -1218,6 +1218,31 @@ def _cli_handler(args):
         indent = None if getattr(args, "json_output", False) else 2
         print(json.dumps(stats, ensure_ascii=False, sort_keys=True, indent=indent, allow_nan=False))
         return 0
+    if command in {"runtime-verify", "jev-usage"} and not 1 <= args.days <= 3650:
+        print("--days requires an integer between 1 and 3650.")
+        return 2
+    if command == "runtime-verify":
+        from .runtime_provenance import report, format_text
+        result = report(days=args.days)
+        print(json.dumps(result, sort_keys=True, allow_nan=False)
+              if args.json_output else format_text(result))
+        return 0
+    if command == "jev-usage":
+        from .usage_ledger import report
+        result = report(days=args.days)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True, allow_nan=False))
+        else:
+            print(
+                f"Jev usage ledger: {result['status']} ({result['days']}d)\n"
+                f"Attempts: {result['begin_count']}, validated: {result['validated']}, "
+                f"unresolved: {result['unresolved']}, pending: {result['pending']}\n"
+                f"Known-cost requests: {result['known_cost_requests']}, "
+                f"unknown-cost requests: {result['unknown_cost_requests']}\n"
+                f"Observed known USD: {result['known_cost_usd']} "
+                "(not reconciled billing)"
+            )
+        return 0 if result["status"] != "unavailable" else 1
     if command == "skill-duplicates":
         from .skill_duplicates import build_report, format_text
 
@@ -1288,7 +1313,7 @@ def _cli_handler(args):
     if command != "setup":
 
         print(
-            "Usage: hermes switchyard <status|cleanup|guide|setup|ensure-toolsets|receipt|stats|wow|skill-duplicates|test> "
+            "Usage: hermes switchyard <status|cleanup|guide|setup|ensure-toolsets|receipt|stats|wow|skill-duplicates|runtime-verify|jev-usage|test> "
             "[--provider ...|--json]"
         )
         return 2
@@ -1374,6 +1399,16 @@ def _setup_cli(parser):
         help="Only count records newer than this window, e.g. 30m, 24h, 7d, or 2w",
     )
     stats.add_argument("--json", action="store_true", dest="json_output", help="Emit compact JSON")
+    runtime = commands.add_parser(
+        "runtime-verify", help="Inspect local source and post-start gateway receipt evidence"
+    )
+    runtime.add_argument("--days", type=int, default=7, metavar="N", help="Trailing days (1-3650)")
+    runtime.add_argument("--json", action="store_true", dest="json_output")
+    usage = commands.add_parser(
+        "jev-usage", help="Summarize optional payload-free Jev request ledger"
+    )
+    usage.add_argument("--days", type=int, default=7, metavar="N", help="Trailing days (1-3650)")
+    usage.add_argument("--json", action="store_true", dest="json_output")
     duplicates = commands.add_parser(
         "skill-duplicates", help="Read-only audit of repeated skill_view reads after automatic loads"
     )

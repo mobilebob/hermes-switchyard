@@ -68,6 +68,54 @@ Lets Jev lower your `/reasoning` level on routine turns. Full guide: [ADAPTIVE-R
 | `adaptive_reasoning_effort_deadline_seconds` | `0.4` | How long to wait for Jev, from 0.1 to 1.5 seconds. On timeout, your level is sent unchanged. |
 | `adaptive_reasoning_effort_default` | `medium` | Deprecated and unused since 0.5.4. |
 
+## Runtime provenance and Jev usage evidence
+
+Switchyard provides two **local, read-only** diagnostic commands:
+
+```text
+hermes -p default switchyard runtime-verify --days 7 --json
+hermes -p default switchyard jev-usage --days 7 --json
+```
+
+`runtime-verify` distinguishes the Git checkout SHA, the CLI's receipt-source
+SHA, and retained receipts attributed to source revisions. On Linux with a
+user-systemd gateway it also reads the host gateway PID and service start time.
+The `runtime_receipt_observed` status requires a matching post-start non-CLI
+receipt, but is **not a process-code attestation**. `gateway_runtime_verified`
+remains false: no command can introspect loaded modules inside an unrelated
+running process. A restarted shared multiplexer and profile-scoped history
+require separate checks.
+
+`jev-usage` reports logical Jev request attempts that reached the shared
+DecisionClient, rather than just skill-routing receipts. It is **disabled by
+default** and does not record anything unless the *gateway process* has
+`SWITCHYARD_JEV_USAGE_LEDGER=on` in its environment. Merely exporting the
+variable in a separate interactive shell or running the CLI with it does not
+enable a running gateway. In a multiplexed gateway the environment flag is
+process-wide, so get approval for all served profiles before enabling it.
+
+When enabled, each real provider call records a bounded, profile-owned
+`begin` record **before** its attempt, followed by `validated` or
+`unresolved`. Crash leftovers remain pending. The same logical call can
+include retryable HTTP attempts; this is not an exact HTTP-send ledger.
+Synthetic test transports do not produce records. Neither request state,
+prompts, skill names, responses, secrets, session IDs nor remote request IDs
+are stored. The file is private, append-only, bounded to 8 MiB, and refuses
+symlink targets. Storage failures are deliberately non-fatal; full coverage
+requires external file health checks, not merely a successful report.
+
+`known_cost_usd` is a sum of observed provider usage `cost` fields and
+**not** a reconciled invoice. Missing cost, failures, and pending attempts
+are **unknown**, not zero. Known-token totals are not estimated cost or
+actual main-model token savings. Bounded storage, excluded old activity and
+disabled periods are not reconstructed. The report labels partial coverage
+explicitly.
+
+This phase does **not** batch Jev requests, switch active models, change skill
+routing, or enable any new network operation. The usage ledger is a separate
+opt-in instrument; evaluate latency and completeness in a test profile before
+enabling it on the production gateway.
+
 ## Read-only duplicate skill loading audit
 
 Run `hermes switchyard skill-duplicates --days 7` for a local report, or add

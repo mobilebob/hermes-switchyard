@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — optional Jev accounting and runtime evidence
+
+- Add read-only `runtime-verify` provenance reporting: checkout/receipt source identity,
+  user-systemd gateway PID/start timestamp where available, and revision-grouped
+  post-start receipts. A match is observational, never a loaded-module attestation.
+- Add opt-in `SWITCHYARD_JEV_USAGE_LEDGER=on` request attempt accounting to
+  the shared Jev client. Real network decisions write bounded begin/finish records
+  before/after requests; crashes and validation failures remain unknown usage,
+  not zero cost. Synthetic transports never write; default remains off.
+- Add read-only `jev-usage` reporting and offline tests. No model/skill routing
+  behavior changes, no new provider requests, and no live default switch.
+- Design inspired by the evidence-accounting/provenance practices of
+  `kerpopule/hermes-jev-skills` (MIT); implementation is original to Switchyard.
+
 ## 0.6.0 (2026-10-04)
 
 This release adds local reports and offline skill checks, does less hosted work on easy turns, and adds opt-in tool review features that stay off by default.

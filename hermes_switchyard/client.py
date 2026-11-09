@@ -19,7 +19,7 @@ from contextvars import ContextVar
 from collections.abc import Callable
 from typing import Any, cast
 
-from . import receipt_state
+from . import receipt_state, usage_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -945,6 +945,25 @@ class DecisionClient:
         return payload
 
     def _decide_single(self, state: Any, questions: dict[str, dict[str, Any]]) -> dict:
+        # Off by default; fake/injected transports never write metered evidence.
+        if self.transport is not None or not usage_ledger.enabled():
+            return self._decide_single_unmetered(state, questions)
+        # Reject invalid local payloads before writing the intent marker.
+        self._payload(state, questions)
+        provider = "typesafe" if self.endpoint == TYPESAFE_ENDPOINT else "openrouter"
+        attempt = usage_ledger.begin(provider)
+        try:
+            result = self._decide_single_unmetered(state, questions)
+        except BaseException:
+            usage_ledger.finish(attempt, provider, outcome="unresolved")
+            raise
+        usage_ledger.finish(
+            attempt, provider, outcome="validated",
+            usage=result.get("usage"), retries=result.get("transport_retries")
+        )
+        return result
+
+    def _decide_single_unmetered(self, state: Any, questions: dict[str, dict[str, Any]]) -> dict:
         started = time.perf_counter()
         call_retries: dict[str, int] = {}
         retries_token = self._call_retries.set(call_retries)
