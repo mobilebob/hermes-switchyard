@@ -6,13 +6,67 @@ model provider, reads Hermes state, or changes routing behavior.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
+import statistics
 import sys
 from collections import Counter
 from pathlib import Path
 
 ARMS = ("switchyard", "jev-skills")
 EGRESS = ("none", "coarse_features", "redacted_text")
+PINS = {
+    "switchyard": "cc45394c6c04627f6e62736f987fceb84117a6d9",
+    "jev-skills": "8316358bf60e98a21477582af829ef11c9cf52fb",
+}
+
+
+def validate_collected(row: dict, case: dict) -> None:
+    """Reject mislabeled fixtures, changed task/catalog identity and false accounting."""
+    catalog = json.loads(Path(__file__).with_name("catalog.json").read_text(encoding="utf-8"))
+    catalog_hash = hashlib.sha256(json.dumps(catalog, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    refs = [f"fixture:{m['model']}" for m in catalog["models"]]
+    task_hash = hashlib.sha256(case["task"].encode()).hexdigest()
+    if row.get("source_sha") != PINS[row["arm"]]:
+        raise InvalidEvidence("Collector source revision differs from pinned source")
+    if (row.get("catalog_sha256") != catalog_hash or row.get("task_sha256") != task_hash
+            or row.get("approved_candidates") != refs or row.get("current_model") != catalog["current"]):
+        raise InvalidEvidence("Collector task or approved candidate identity mismatch")
+    if row.get("evidence_kind") not in ("offline_fixture", "offline_no_response"):
+        raise InvalidEvidence("Collector accepts offline evidence only")
+    if row.get("provider_requests") != [] or row["external_calls"] != 0 or row["egress"] != "none":
+        raise InvalidEvidence("Offline collection cannot report provider calls or egress")
+    if type(row.get("simulated_requests")) is not int or not 0 <= row["simulated_requests"] <= 20:
+        raise InvalidEvidence("Invalid simulated request count")
+    proposed = row.get("proposed_model")
+    if proposed is not None and proposed not in refs:
+        raise InvalidEvidence("Proposal outside approved fixture candidates")
+    if row["would_switch"] != (proposed is not None and proposed != catalog["current"]):
+        raise InvalidEvidence("Proposal and would_switch disagree")
+    if type(row.get("abstained")) is not bool or type(row.get("worker_failed")) is not bool:
+        raise InvalidEvidence("Collector requires explicit abstention and failure evidence")
+    if row.get("safety_decision") not in ("rejected", "abstained", "allowed_shadow_only"):
+        raise InvalidEvidence("Missing collector safety decision")
+    expected_safety = ("rejected" if row["would_switch"] and not case["may_switch"] else
+                       "abstained" if row["abstained"] else "allowed_shadow_only")
+    if row["safety_decision"] != expected_safety:
+        raise InvalidEvidence("Safety decision contradicts policy or abstention")
+    counters = (row.get("network_attempts"), row.get("process_attempts"))
+    accounting = row.get("attempt_accounting")
+    if row["worker_failed"] and accounting == "unknown_worker_failed":
+        if any(c is not None for c in counters):
+            raise InvalidEvidence("Unknown worker accounting cannot claim observed attempt counts")
+    elif accounting != "observed_python_guards" or any(type(c) is not int or c < 0 for c in counters):
+        raise InvalidEvidence("Missing or invalid observed escape-attempt accounting")
+    elif not row["worker_failed"] and any(counters):
+        raise InvalidEvidence("Successful offline worker cannot have escape attempts")
+
+
+def require_frozen_cases(cases: dict) -> None:
+    raw = json.loads(Path(__file__).with_name("cases.json").read_text(encoding="utf-8"))
+    if cases != {case["id"]: case for case in raw["cases"]}:
+        raise InvalidEvidence("Collector evidence requires the complete frozen case set and policy")
 
 
 class InvalidEvidence(ValueError):
@@ -78,11 +132,27 @@ def read_observations(path: Path, cases: dict[str, dict]) -> dict[tuple[str, str
             raise InvalidEvidence(f"Line {i}: missing/invalid external_calls")
         if row.get("would_switch") and (not isinstance(row.get("proposed_model"), str) or not row["proposed_model"].strip()):
             raise InvalidEvidence(f"Line {i}: a switch proposal must identify a model")
+        if row.get("schema_version", 1) not in (1, 2):
+            raise InvalidEvidence(f"Line {i}: unsupported evidence schema")
+        if row.get("schema_version", 1) == 2:
+            require_frozen_cases(cases)
+            validate_collected(row, cases[key[0]])
+        elif any(field in row for field in (
+            "evidence_kind", "approved_candidates", "task_sha256", "catalog_sha256",
+            "current_model", "provider_requests", "simulated_requests", "abstained",
+            "safety_decision", "worker_failed", "network_attempts", "process_attempts", "attempt_accounting",
+        )):
+            raise InvalidEvidence("Collector evidence requires schema_version=2")
         rows[key] = row
+    kinds = {(r.get("schema_version", 1), r.get("evidence_kind", "operator_supplied")) for r in rows.values()}
+    if len(kinds) > 1:
+        raise InvalidEvidence("Do not mix fixture scenarios or operator and collector evidence")
     return rows
 
 
 def compare(cases: dict[str, dict], rows: dict[tuple[str, str], dict]) -> dict:
+    if any(row.get("schema_version") == 2 for row in rows.values()):
+        require_frozen_cases(cases)
     reports = {}
     for arm in ARMS:
         observed = [row for (case_id, name), row in rows.items() if name == arm]
@@ -105,15 +175,28 @@ def compare(cases: dict[str, dict], rows: dict[tuple[str, str], dict]) -> dict:
             "privacy_violations": sorted(privacy_violations),
             "external_calls": sum(r["external_calls"] for r in observed),
             "latency_ms_total": sum(r["latency_ms"] for r in observed),
+            "latency_ms_p50": statistics.median(r["latency_ms"] for r in observed) if observed else None,
+            "latency_ms_p95_nearest_rank": sorted(r["latency_ms"] for r in observed)[math.ceil(.95 * len(observed)) - 1] if observed else None,
+            "abstentions": sum(r.get("abstained", False) for r in observed),
+            "safety_decisions": dict(sorted(Counter(r.get("safety_decision", "unreported") for r in observed).items())),
+            "simulated_requests": sum(r.get("simulated_requests", 0) for r in observed),
+            "worker_failures": sorted(r["case_id"] for r in observed if r.get("worker_failed")),
             "source_shas": dict(sorted(Counter(r["source_sha"] for r in observed).items())),
         }
     ready = all(
-        not r["missing"] and not r["policy_violations"] and not r["privacy_violations"]
+        not r["missing"] and not r["policy_violations"] and not r["privacy_violations"] and not r["worker_failures"]
         for r in reports.values()
     )
+    kinds = sorted({r.get("evidence_kind", "operator_supplied") for r in rows.values()})
+    status = "complete_synthetic_shadow_screen" if ready else "incomplete_or_blocked"
+    if ready and kinds == ["offline_fixture"]:
+        status = "offline_fixture_only"
+    if ready and kinds == ["offline_no_response"]:
+        status = "offline_no_response_only"
     return {
         "schema_version": 1,
-        "status": "complete_synthetic_shadow_screen" if ready else "incomplete_or_blocked",
+        "status": status,
+        "evidence_kinds": kinds,
         "scope": "operator-supplied shadow observations; not downstream task correctness or realized savings",
         "case_count": len(cases),
         "arms": reports,
@@ -133,7 +216,9 @@ def main(argv=None) -> int:
         print(f"Invalid comparison evidence: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if report["status"] == "complete_synthetic_shadow_screen" else 1
+    return 0 if report["status"] in (
+        "complete_synthetic_shadow_screen", "offline_fixture_only", "offline_no_response_only"
+    ) else 1
 
 
 if __name__ == "__main__":

@@ -41,6 +41,97 @@ python3 -m unittest discover -s tests -p test_jev_skills_comparison.py -v
 
 Incomplete case/arm coverage, unsafe switch proposals, privacy excesses and malformed evidence fail the gate. Passing is *only* a complete synthetic shadow policy screen; output always says `promotion_authorized: false`.
 
+## Collector: prerequisites and offline execution
+
+`collect.py` has **no live transport or automatic switching mode**. Its default
+is a read-only preflight: verify the two exact clean checkouts, the 12 frozen
+cases and the explicit candidate catalog, then list the missing live prerequisites.
+The included `catalog.json` approves only `fixture:small` and `fixture:large` for
+**offline simulation**, not any real provider, account or model.
+
+```text
+python evaluation/jev_skills_comparison/collect.py \
+  --switchyard-source /path/to/pinned-switchyard \
+  --jev-skills-source /path/to/pinned-jev-skills
+```
+
+A separate owner-approved experiment needs explicit Jev request **and monetary**
+caps, timeouts/retries/uncertain-dispatch accounting, approved provider account
+and real model IDs, and approved synthetic outbound payloads. A reviewed live
+transport must be added separately. There is intentionally no flag that enables
+paid calls in this collector. No main-model request is needed to prepare it.
+
+### Reproduce the offline wiring check
+
+Use an existing test interpreter. Check out each revision above into separate
+clean disposable repositories; do not point at an installed plugin or import a
+Hermes plugin hook. No dependency installation is required by the collector.
+
+```text
+python evaluation/jev_skills_comparison/collect.py \
+  --switchyard-source /path/to/pinned-switchyard \
+  --jev-skills-source /path/to/pinned-jev-skills \
+  --offline no-response --output /path/to/new-no-response-run
+
+python evaluation/jev_skills_comparison/collect.py \
+  --switchyard-source /path/to/pinned-switchyard \
+  --jev-skills-source /path/to/pinned-jev-skills \
+  --offline synthetic-simple --output /path/to/new-fixture-run
+
+python evaluation/jev_skills_comparison/compare.py \
+  --observations /path/to/new-fixture-run/observations.jsonl
+```
+
+Each run is 12 cases × 2 arms in 24 fresh subprocesses with separate temporary
+homes, allowlisted environments (no inherited credentials or `PYTHONPATH`),
+bytecode disabled, no production tools, and Python network/process guards. This
+is defense in depth for these pinned trusted sources, **not an OS sandbox for
+arbitrary code**. Workers are decision-only library adapters, not complete
+Hermes `llm_request` hook or gateway integration tests.
+
+Both arms receive byte-identical tasks and the same provider, approved candidate
+identities, context limits and relative price ordering. The common adapter
+records one current model. Switchyard is called through
+`recommend_approved_model`; Jev Skills through `jevkit.route.decide`. Candidate
+metadata is translated to their different APIs; this does **not** make their
+classifier questions, thresholds, or safety policies identical. The `may_switch`
+policy labels are used only by the independent safety screen, not as classifier
+answers. Jev's API has explicit current-model/manual-pin inputs; Switchyard's
+advisory API does not. The same manual-pin task text reaches both, and the
+independent safety envelope rejects any forbidden proposal. This API asymmetry
+must not be presented as a measured production regression.
+
+- `no-response`: injected classifier unavailability; measures fallback wiring.
+- `synthetic-simple`: explicit generated classifier answers, not inference,
+  quality labels, an observed Jev response, or evidence a cheap model succeeds.
+- Every row records proposal, abstention/reason, source SHA, input/catalog hashes,
+  safety decision, attempted stub calls, external provider requests and latency.
+  Offline provider requests are empty, external calls are zero, and egress is
+  `none`; simulated requests are counted separately, not treated as paid calls.
+- Latency includes process start, imports and offline decision logic. It is not
+  Jev inference latency or production end-to-end timing.
+- Raw unsafe switch proposals remain visible to the comparator even when the
+  independent safety envelope rejects them. Nothing is applied in either arm.
+- The manifest records exact source identity, catalog, interpreter, worker hash
+  and prerequisites. Source identity is checked before and after execution;
+  partial output and worker failures never count as successful coverage.
+
+The collector automatically reparses persisted JSONL and writes
+`comparison.json`. Schema-v2 comparison validates pinned sources and frozen
+input/catalog identity, rejects mixed evidence modes, unapproved candidates,
+non-shadow application and impossible offline egress/accounting. Fixture runs
+are labeled `offline_fixture_only` or `offline_no_response_only` when otherwise
+clean; unsafe proposals, missing coverage and worker failures remain blocked.
+The collector and comparator return zero for valid, complete offline-only
+results, **without** claiming measured inference or promotion; blocked/incomplete
+results return one, malformed evidence returns two. The forced-simple scenario
+can therefore return one even though collection itself completed. Legacy
+schema-v1 operator evidence is retained for compatibility and has weaker provenance validation; it is not a
+collector receipt. `promotion_authorized` is always false.
+
+Generated manifests, observations and logs belong outside the repository. See
+[Stage A findings](STAGE_A.md) for actual execution results and remaining limits.
+
 ## Stage B: memory filtering
 
 Compare Jev Skills memory filtering to Switchyard's session-search rerank as distinct features. Use fake passages containing known facts and planted instructions. Measure fact recall, unsafe instruction promotion, benign loss, coverage, latency, egress and fallback. Do not send customer memory to Jev.
