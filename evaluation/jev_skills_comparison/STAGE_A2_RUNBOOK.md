@@ -1,5 +1,21 @@
 # Stage A2: direct-model correctness runbook (owner-authorized scope)
 
+> **2026-11-10 superseding Codex execution policy:** Owner chose to retain ChatGPT Codex.
+> On this OAuth Responses route Hermes omits `max_output_tokens`, so the earlier
+> documented 128-token *provider-side* cap does **not** apply. A measured
+> post-response 128-total-output-token acceptance threshold replaces it. If
+> observed usage exceeds 128, preserve usage and an answer hash, mark **failed**
+> (ineligible for scoring), stop and do not retry. One historical Sol/`extract-c`
+> attempt (`a2-421e6b05268f4e68bd3183f67b694934`) is permanently uncertain
+> and excluded from all new runs: at most **47** new case/model requests remain.
+> Hermes conversation-level retries are limited to one total attempt; the
+> existing single-physical-HTTP-request guard remains. A new manifest schema
+> and frozen source revision record this protocol change. No dollar ceiling,
+> production gateway edits, or historical-ledger changes. This notice supersedes
+> earlier runbook references to a provider-enforced 128-token cap, 48 new
+> attempts or the temporary-HERMES_HOME launcher.
+>
+
 This runbook prepares **only** the direct Sol/Luna correctness comparison. It does not execute any main-model call, install another plugin, start a gateway, change a profile, run Jev decisions, or promote model routing. The owner directed this study to continue **without a dollar ceiling**. No spending reservation or monetary cap is required. The **48 distinct request** scope, privacy rules, token/output limits, and non-retry controls remain binding.
 
 ## Scope and frozen identity

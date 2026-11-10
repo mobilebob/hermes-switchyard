@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 
 APPROVED = ("gpt-6.1-sol", "gpt-6-luna")
+OUTPUT_POLICY = "codex_posthoc_observed_output_tokens_le_128"
+OUTPUT_ACCEPTANCE_MAX = 128
 RUNTIME_MODULES = (
     "run_agent", "hermes_state", "hermes_constants",
     "hermes_cli.runtime_provider", "hermes_cli.env_loader", "agent.secret_scope",
@@ -76,12 +78,22 @@ def one_http_post(client, model: str, *, output_cap: int = 128):
         hooks["request"].remove(allow_one)
 
 
-def check_wire_payload(payload: dict, model: str, *, output_cap: int = 128) -> None:
+def check_wire_payload(payload: dict, model: str) -> None:
+    """Require the Codex backend's real no-cap wire format; threshold is post-response."""
     if (not isinstance(payload, dict) or payload.get("model") != model
             or payload.get("tools") not in (None, [])
-            or payload.get("max_output_tokens") != output_cap
+            or "max_output_tokens" in payload
             or payload.get("previous_response_id") is not None):
-        raise RuntimeError("Outbound model/tool/output-token contract mismatch")
+        raise RuntimeError("Outbound Codex model/tool contract mismatch")
+
+
+def enforce_single_application_attempt(agent) -> None:
+    """Reduce Hermes' outer retry loop to one attempt in this isolated worker."""
+    if type(getattr(agent, "_api_max_retries", None)) is not int:
+        raise RuntimeError("Unknown Hermes application retry setting")
+    agent._api_max_retries = 1
+    if agent._api_max_retries != 1:
+        raise RuntimeError("Hermes application retries not disabled")
 
 
 def main(args) -> None:
@@ -95,7 +107,8 @@ def main(args) -> None:
     if (not isinstance(attempt_id, str) or not attempt_id.startswith("a2-") or
             model_id not in tuple("openai-codex:" + m for m in APPROVED) or
             not isinstance(prompt, str) or not 0 < len(prompt) <= 2000 or
-            job.get("output_token_cap") != 128):
+            job.get("output_token_acceptance_max") != OUTPUT_ACCEPTANCE_MAX or
+            job.get("output_policy") != OUTPUT_POLICY):
         raise RuntimeError("Invalid single-request public study contract")
     model = model_id.split(":", 1)[1]
     # Verify the imported modules, including the source that owns native retries.
@@ -149,6 +162,7 @@ def main(args) -> None:
         )
         agent.tools = []
         agent.valid_tool_names = set()
+        enforce_single_application_attempt(agent)
         if getattr(agent, "_fallback_chain", None):
             raise RuntimeError("Unexpected model fallback configured")
         call_models = []
@@ -185,6 +199,8 @@ def main(args) -> None:
                 "effective_model": result.get("served_model") if isinstance(result.get("served_model"), str) else None,
                 "physical_call_count": physical_requests[0], "fallback_enabled": False,
                 "tools_enabled": False, "completed": True,
+                "output_policy": OUTPUT_POLICY, "output_token_acceptance_max": OUTPUT_ACCEPTANCE_MAX,
+                "provider_output_cap_enforced": False,
                 "answer": result.get("final_response"), "elapsed_ms": elapsed_ms,
                 "input_tokens": result.get("input_tokens"),
                 "output_tokens": result.get("output_tokens"),

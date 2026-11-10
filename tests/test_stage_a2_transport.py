@@ -66,14 +66,22 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(client.sent, 0)
             self.assertEqual(client._client.event_hooks["request"], [])
 
-    def test_wire_contract_requires_model_and_output_cap(self):
-        valid = {"model": "gpt-6.1-sol", "tools": [], "max_output_tokens": 128}
+    def test_codex_wire_must_omit_unsupported_output_cap(self):
+        valid = {"model": "gpt-6.1-sol", "tools": []}
         worker.check_wire_payload(valid, "gpt-6.1-sol")
         for change in ({"model": "gpt-6-luna"}, {"tools": [{"type": "function"}]},
-                       {"max_output_tokens": None}, {"max_output_tokens": 512},
-                       {"previous_response_id": "old-response"}):
+                       {"max_output_tokens": None}, {"max_output_tokens": 128},
+                       {"max_output_tokens": 512}, {"previous_response_id": "old-response"}):
             with self.subTest(change=change), self.assertRaisesRegex(RuntimeError, "contract mismatch"):
                 worker.check_wire_payload({**valid, **change}, "gpt-6.1-sol")
+
+    def test_application_retries_reduced_to_one(self):
+        agent = SimpleNamespace(_api_max_retries=3)
+        worker.enforce_single_application_attempt(agent)
+        self.assertEqual(agent._api_max_retries, 1)
+        for value in (None, "3", False):
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "retry setting"):
+                worker.enforce_single_application_attempt(SimpleNamespace(_api_max_retries=value))
 
 
 if __name__ == "__main__":

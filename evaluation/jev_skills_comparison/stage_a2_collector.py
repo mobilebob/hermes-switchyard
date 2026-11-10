@@ -30,7 +30,9 @@ WORKER = HERE / "stage_a2_native_worker.py"
 FROZEN_PLAN_SHA = "6e7ac367e5a3b0fea9dd30648dc640e3169eeb855302e52f190f8d52f65766ef"
 SOURCE_FILES = (Path(__file__), WORKER, HERE / "correctness.py", PLAN)
 SEED = 20261109
-OUTPUT_LIMIT = 128
+OUTPUT_LIMIT = 128  # post-response total output-token acceptance, NOT provider cap
+OUTPUT_POLICY = "codex_posthoc_observed_output_tokens_le_128"
+PRIOR_UNCERTAIN_PAIRS = frozenset({("extract-c", "openai-codex:gpt-6.1-sol")})
 TIMEOUT_SECONDS = 120
 MAX_JOBS = 48
 
@@ -87,8 +89,8 @@ def ordered_pairs(tasks: dict) -> list[tuple[str, str]]:
 def metadata() -> dict:
     tasks, plan_sha = require_plan()
     return {
-        "schema_version": 1,
-        "study": "stage_a2_direct_model_once_only",
+        "schema_version": 2,
+        "study": "stage_a2_codex_posthoc_output_once_only",
         "created_utc": utc(),
         "source_sha": git_identity(),
         "plan_sha256": plan_sha,
@@ -97,7 +99,10 @@ def metadata() -> dict:
         "models": list(APPROVED_MODELS),
         "order": [list(p) for p in ordered_pairs(tasks)],
         "max_jobs": MAX_JOBS,
-        "output_token_cap": OUTPUT_LIMIT,
+        "output_token_cap": None,
+        "output_token_acceptance_max": OUTPUT_LIMIT,
+        "output_policy": OUTPUT_POLICY,
+        "excluded_prior_uncertain_pairs": [list(p) for p in sorted(PRIOR_UNCERTAIN_PAIRS)],
         "request_timeout_seconds": TIMEOUT_SECONDS,
         "retry_policy": "no_retry_even_after_unknown_dispatch",
         "monetary_cap": None,
@@ -170,7 +175,7 @@ def load_meta(root: Path) -> dict:
     except (ValueError, OSError) as exc:
         raise StudyError("Cannot read frozen study metadata") from exc
     current = metadata()
-    for key in ("schema_version", "study", "source_sha", "plan_sha256", "source_sha256", "provider", "models", "order", "max_jobs", "output_token_cap", "request_timeout_seconds", "retry_policy"):
+    for key in ("schema_version", "study", "source_sha", "plan_sha256", "source_sha256", "provider", "models", "order", "max_jobs", "output_token_cap", "output_token_acceptance_max", "output_policy", "excluded_prior_uncertain_pairs", "request_timeout_seconds", "retry_policy"):
         if recorded.get(key) != current.get(key):
             raise StudyError("Study manifest diverged: " + key)
     if recorded.get("monetary_cap") is not None:
@@ -195,7 +200,8 @@ def prepare(root: Path) -> dict:
 
 def request_body(case: dict, model_id: str) -> dict:
     # Exact public prompt, no tools, history, files, or memory.
-    return {"provider": "openai-codex", "model": model_id, "prompt": case["prompt"], "max_output_tokens": OUTPUT_LIMIT,
+    return {"provider": "openai-codex", "model": model_id, "prompt": case["prompt"], "output_token_acceptance_max": OUTPUT_LIMIT,
+            "output_policy": OUTPUT_POLICY, "provider_output_cap_enforced": False,
             "tools": [], "history": [], "fallback": None}
 
 
@@ -230,17 +236,24 @@ def normalize_result(result: object, intent: dict, case: dict, elapsed_ms: float
                 and result.get("physical_call_count") == 1
                 and result.get("fallback_enabled") is False
                 and result.get("tools_enabled") is False
+                and result.get("output_policy") == OUTPUT_POLICY
+                and result.get("output_token_acceptance_max") == OUTPUT_LIMIT
+                and result.get("provider_output_cap_enforced") is False
                 and result.get("completed") is True
                 and (effective is None or effective in (wanted, intent["model_id"]))
                 and isinstance(result.get("answer"), str)
                 and len(result["answer"]) <= 20000
                 and eligible_usage(result.get("input_tokens"))
                 and eligible_usage(result.get("output_tokens"))):
-            status = "completed"
-            answer = result["answer"]
+            over = result["output_tokens"] > OUTPUT_LIMIT
+            status = "failed" if over else "completed"
+            answer = None if over else result["answer"]
             input_tokens = result["input_tokens"]
             output_tokens = result["output_tokens"]
             receipt = {"wire_model": wanted, "effective_model_reported": effective,
+                       "provider_output_cap_enforced": False,
+                       "posthoc_output_threshold_exceeded": over,
+                       "oversized_answer_sha256": digest(result["answer"].encode("utf-8")) if over else None,
                        "runtime_modules_sha256": result.get("runtime_modules_sha256"),
                        "provider_request_id": result.get("provider_request_id") if isinstance(result.get("provider_request_id"), str) else None,
                        "source": "isolated_native_hermes_worker"}
@@ -281,7 +294,7 @@ def invoke_native(intent: dict, study_root: Path, auth_home: Path, hermes_root: 
     env.update({"HERMES_HOME": str(auth_home), "HERMES_DISABLE_LAZY_INSTALLS": "1", "PYTHONDONTWRITEBYTECODE": "1"})
     args = [*command, "--home", str(home), "--auth-home", str(auth_home), "--hermes-root", str(hermes_root)]
     job = {"attempt_id": intent["attempt_id"], "model": intent["model_id"], "prompt": intent["body"]["prompt"],
-           "output_token_cap": OUTPUT_LIMIT}
+           "output_token_acceptance_max": OUTPUT_LIMIT, "output_policy": OUTPUT_POLICY}
     p = subprocess.run(args, input=json.dumps(job) + "\n", text=True, stdout=subprocess.PIPE,
                        stderr=subprocess.DEVNULL, env=env, timeout=TIMEOUT_SECONDS)
     if len(p.stdout) > 64_000:
@@ -339,6 +352,10 @@ def export(root: Path, db: sqlite3.Connection, meta: dict, tasks: dict) -> dict:
     report = evaluate(tasks, parsed, meta["plan_sha256"])
     report["collector_intents_persisted"] = len(records)
     report["collector_unresolved_intents"] = sum(r[4] == "intent" for r in records)
+    report["excluded_prior_uncertain_pairs"] = [list(p) for p in sorted(PRIOR_UNCERTAIN_PAIRS)]
+    report["posthoc_output_threshold_exceeded"] = sum(
+        (r.get("collector_receipt") or {}).get("posthoc_output_threshold_exceeded") is True for r in rows)
+    report["provider_output_cap_enforced"] = False
     report["provider_calls_independently_verified"] = False
     report["promotion_authorized"] = False
     atomic_json(root / "comparison.json", report)
@@ -362,6 +379,7 @@ def execute(root: Path, auth_home: Path, hermes_root: Path, *, max_new: int, run
                 export(root, db, meta, tasks)
                 raise StudyError("Unresolved prior intent: stop, preserve evidence and do not replay")
             remaining = [(i, cid, mod) for i, (cid, mod) in enumerate(meta["order"]) if
+                         (cid, mod) not in PRIOR_UNCERTAIN_PAIRS and
                          not db.execute("SELECT 1 FROM attempts WHERE case_id=? AND model_id=?", (cid, mod)).fetchone()]
             if not remaining:
                 return export(root, db, meta, tasks)

@@ -41,6 +41,8 @@ class CollectorTests(unittest.TestCase):
                 "requested_model": model, "wire_model": model, "effective_model": model,
                 "physical_call_count": 1, "fallback_enabled": False, "tools_enabled": False,
                 "completed": True, "answer": collector.require_plan()[0][intent["case_id"]]["expected"],
+                "output_policy": collector.OUTPUT_POLICY, "output_token_acceptance_max": collector.OUTPUT_LIMIT,
+                "provider_output_cap_enforced": False,
                 "input_tokens": 95, "output_tokens": 9,
                 "runtime_modules_sha256": "f" * 64}
 
@@ -58,23 +60,57 @@ class CollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(collector.StudyError, "already exists"):
             collector.prepare(self.root)
         self.assertIsNone(collector.load_meta(self.root)["monetary_cap"])
+        self.assertIsNone(collector.load_meta(self.root)["output_token_cap"])
+        self.assertEqual(collector.load_meta(self.root)["output_policy"], collector.OUTPUT_POLICY)
 
-    def test_all_48_fixture_calls_scored_without_promotion(self):
+    def test_47_fixture_calls_exclude_prior_uncertain_pair(self):
         collector.prepare(self.root)
         actual = []
         def runner(intent):
             actual.append((intent["case_id"], intent["model_id"]))
             return self.fixture(intent)
         report = collector.execute(self.root, self.auth, self.hermes, max_new=48, runner=runner)
-        self.assertEqual(len(actual), 48)
-        self.assertEqual(len(set(actual)), 48)
-        self.assertEqual(report["status"], "complete_observed_direct_unverified")
-        self.assertEqual(report["paired_outcomes"]["both_correct"], 24)
+        self.assertEqual(len(actual), 47)
+        self.assertEqual(len(set(actual)), 47)
+        self.assertNotIn(("extract-c", "openai-codex:gpt-6.1-sol"), actual)
+        self.assertEqual(report["status"], "incomplete_or_unresolved")
+        self.assertEqual(report["paired_outcomes"]["both_correct"], 23)
+        self.assertEqual(report["paired_outcomes"]["not_scored"], 1)
+        self.assertFalse(report["provider_output_cap_enforced"])
         self.assertFalse(report["provider_calls_independently_verified"])
         self.assertFalse(report["promotion_authorized"])
         again = collector.execute(self.root, self.auth, self.hermes, max_new=48, runner=runner)
-        self.assertEqual(len(actual), 48)
-        self.assertEqual(again["collector_intents_persisted"], 48)
+        self.assertEqual(len(actual), 47)
+        self.assertEqual(again["collector_intents_persisted"], 47)
+
+    def test_output_threshold_exceeded_preserves_usage_and_stops(self):
+        collector.prepare(self.root)
+        requested = []
+        def oversized(intent):
+            requested.append((intent["case_id"], intent["model_id"]))
+            return {**self.fixture(intent), "output_tokens": 129}
+        result = collector.execute(self.root, self.auth, self.hermes, max_new=48, runner=oversized)
+        self.assertEqual(len(requested), 1)
+        self.assertNotIn(("extract-c", "openai-codex:gpt-6.1-sol"), requested)
+        self.assertEqual(result["posthoc_output_threshold_exceeded"], 1)
+        row = json.loads((self.root / "observations.jsonl").read_text().splitlines()[0])
+        self.assertEqual(row["status"], "failed")
+        self.assertIsNone(row["answer"])
+        self.assertEqual((row["input_tokens"], row["output_tokens"]), (95, 129))
+        self.assertTrue(row["collector_receipt"]["posthoc_output_threshold_exceeded"])
+        with self.assertRaisesRegex(collector.StudyError, "Unresolved prior intent"):
+            collector.execute(self.root, self.auth, self.hermes, max_new=1, runner=oversized)
+        self.assertEqual(len(requested), 1)
+
+    def test_missing_response_policy_is_uncertain(self):
+        collector.prepare(self.root)
+        def incomplete(intent):
+            result = self.fixture(intent)
+            result.pop("output_policy")
+            return result
+        collector.execute(self.root, self.auth, self.hermes, max_new=1, runner=incomplete)
+        row = json.loads((self.root / "observations.jsonl").read_text().splitlines()[0])
+        self.assertEqual(row["status"], "uncertain")
 
     def test_resume_continues_unattempted_pairs_but_not_previous_ones(self):
         collector.prepare(self.root)
