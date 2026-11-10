@@ -13,6 +13,10 @@ import worker as isolated
 from live_transport import MODEL, canonical, strict_loads, Uncertain
 from collect import verify_source
 
+# The real credential belongs exclusively to the parent broker. Native SDKs
+# require a nonempty placeholder even when their transport is injected.
+TRANSPORT_SENTINEL = "parent-transport-owned"
+
 CATALOG = {
     "provider": "openai-codex", "current": "openai-codex:gpt-6.1-sol",
     "metadata_note": "Conservative 4096-token evaluation context floor; reference input-price ordering only, not Codex billing or measured quality.",
@@ -51,7 +55,7 @@ def decide(payload, perform):
     if payload["arm"] == "switchyard":
         policy = isolated._load_module(root, "hermes_switchyard", "model_policy")
         client_module = importlib.import_module("hermes_switchyard.client")
-        client = client_module.DecisionClient(api_key="parent-transport-owned", model=MODEL,
+        client = client_module.DecisionClient(api_key=TRANSPORT_SENTINEL, model=MODEL,
             endpoint="https://api.typesafe.ai/v1/systemone", transport=perform)
         registry = [{"id": row["id"], "provider": provider, "model": row["model"],
             "account": "owner-approved-existing-codex-account", "approved": True,
@@ -75,7 +79,7 @@ def decide(payload, perform):
                 raise route.client.JevError("shadow_no_retry", "parent broker blocked or uncertain") from None
         def ask(state, questions, **_kwargs):
             return native_ask(state, questions, provider="typesafe", model=MODEL,
-                api_key="parent-transport-owned", timeout=15, retries=0, transport=transport)
+                api_key=TRANSPORT_SENTINEL, timeout=15, retries=0, transport=transport)
         route.client.ask = ask
         ordered = sorted(models, key=lambda row: row["cost"])
         tiers = {}

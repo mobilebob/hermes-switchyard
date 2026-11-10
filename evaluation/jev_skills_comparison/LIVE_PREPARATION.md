@@ -1,9 +1,50 @@
 # Stage A live transport preparation
 
-This is **preparation, not a completed live comparison**. The transport is a
-separate evaluation library; the production plugin, gateway hooks, profiles and
-model-selection configuration are unchanged. No CLI here can dispatch calls.
-The existing offline collector remains offline-only.
+This is a separate evaluation driver, **not production model routing**. The
+production plugin, gateway hooks, profiles and model-selection configuration are
+unchanged. The existing offline collector remains offline-only. `live_driver.py`
+can prepare a fully verified plan without dispatch, then execute that exact plan
+through the isolated broker and one durable ledger.
+
+## Verified first-party billing and guarded execution
+
+The [official billing article](https://help.typesafe.ai/articles/5187202169-how-much-does-jev-cost)
+states that USD 0.042/M input tokens applies to every account, output is free,
+and there are no per-request, failed-request or minimum fees. The
+[model documentation](https://docs.typesafe.ai/models) states that state is
+ingested once and that the default 64k request limit covers state plus all
+questions. Long context is off by default and requires its special header.
+The broker never sends that header, media, fallback or additional service calls.
+
+`billing_evidence.py` verifies the saved first-party URLs, resolved origins,
+source hashes and significant tariff/context clauses in both the original
+source and extracted text. The driver does not accept a boolean-only pricing
+approval. The conservative 262,144-token ceiling exceeds the default context;
+at the documented tariff its upward-rounded input cost is 11,011 micro-USD,
+below the permanently consumed 20,000-micro-USD reservation. Twenty-four such
+reservations total USD 0.48, below the USD 0.50 authorization.
+
+```text
+python evaluation/jev_skills_comparison/live_driver.py --prepare \
+  --output /owner-controlled/durable-trial \
+  --reviewed-plan /reviewed/native-outbound-review.json \
+  --billing-evidence /verified/first-party-sources \
+  --switchyard-source /pinned/switchyard --jev-skills-source /pinned/jev-skills
+
+python evaluation/jev_skills_comparison/live_driver.py --execute \
+  --output /owner-controlled/durable-trial --initialize-ledger
+```
+
+Use `--initialize-ledger` exactly once, and only when no trial ledger exists.
+The existing `TYPESAFE_API_KEY` is read by the parent broker only; no secret goes
+into child arguments, payloads or logs. Resume without the initialization flag.
+Previously attempted or failed cases are never replayed, even if a response was
+lost before observation recording. The driver stops new dispatch after a
+provider/transport failure or changed prerequisite. Code, frozen policy,
+billing evidence and approval-file identities are rechecked before dispatch.
+Each observation is flushed/fsynced; unresolved ledger reservations survive
+interruption. Billing confirmation remains distinct from provider-usage-based
+estimates. No main-model request or route application exists in this driver.
 
 ## Limits and prerequisites
 
@@ -120,13 +161,12 @@ reported as unknown, never zero for an attempted request.
 - The shared frozen case set is unchanged. Private/no-text cases must be recorded
   as local exclusions, not sent or replaced with invented provider decisions.
 
-The prepared transport does not install Jev Skills or enable a live collector
-driver. First select/approve the real candidate allowlist, compile and verify
-both exact native payload sets, and verify the applicable monetary bound. The
-first reserved request may then establish API authentication. Preserve raw
-proposals, abstentions, policy rejections, measured latency and ledger references
-when a separately verified live driver is connected; do not feed fixtures into
-the comparison as measured evidence.
+The live driver does not install Jev Skills or activate production routing. It
+uses the approved real pair, exact reviewed native payloads, saved first-party
+billing proof and existing TypeSafe credential. Authentication occurs on the
+first reserved request. It preserves proposals, abstentions, local exclusions,
+policy rejections, measured latency and ledger references; generated fixtures
+are never fed into the live comparison as measured evidence.
 
 Validation results and current blockers are recorded in draft PR #1. Generated
 inventories, budget databases, raw observations, logs and package archives stay
