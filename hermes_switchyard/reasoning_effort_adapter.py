@@ -1600,7 +1600,9 @@ class ReasoningEffortController:
         receipt_mode: Any = None,
         receipt_line: Any = None,
         client_identity: Callable[[], Any] | None = None,
+        shared_decisions: Any = None,
     ) -> None:
+        self.shared_decisions = shared_decisions
         self.enabled = enabled is True
         # Deprecated: the fallback is always the request's own level.
         self.default_effort = normalize_effort(default_effort)
@@ -2694,7 +2696,28 @@ class ReasoningEffortController:
                         effort=effort, requested=requested, jev_called=False,
                         provider=provider, model=model, api_mode=api_mode,
                     )
-                choice = self._ask_jev(state, capture, requested_wire, candidates)
+                # One clean foreground skill decision may own this first Jev
+                # effort answer. A failed match retains independent behavior.
+                shared = None
+                if (
+                    self.shared_decisions is not None
+                    and not state.outcomes
+                    and not state.stuck
+                    and closed is None
+                    and provider == "openai-codex"
+                    and api_mode == "codex_responses"
+                    and model == "gpt-6-sol"
+                ):
+                    shared = self.shared_decisions.consume(
+                        (session_id, task_id, turn_id),
+                        capture,
+                        requested_wire,
+                        candidates,
+                        self,
+                    )
+                choice = shared if shared is not None else self._ask_jev(
+                    state, capture, requested_wire, candidates
+                )
                 jev_called = choice.get("jev_called") is True
                 state.jev_calls += int(jev_called)
                 state.dirty = False
@@ -3320,6 +3343,7 @@ def register_reasoning_effort_adapter(
     receipt_line: Any = None,
     client_identity: Callable[[], Any] | None = None,
     register_llm_request: bool = True,
+    shared_decisions: Any = None,
 ) -> dict[str, Any]:
     """Register llm_request middleware, turn and tool hooks, and ``/switchyard``."""
     global _LAST_REGISTRATION, _ACTIVE_LLM_REQUEST_CALLBACK
@@ -3383,6 +3407,7 @@ def register_reasoning_effort_adapter(
         step_adaptation=settings["step_adaptation"],
         receipt_mode=settings["receipt_mode"],
         client_identity=client_identity,
+        shared_decisions=shared_decisions,
     )
     _ACTIVE_LLM_REQUEST_CALLBACK = controller.on_llm_request
     register_middleware = getattr(ctx, "register_middleware", None)

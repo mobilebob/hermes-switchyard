@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "study": "public-synthetic-downstream-model-correctness",
+  "provider": "openai-codex",
+  "models": ["openai-codex:gpt-6.1-sol", "openai-codex:gpt-6-luna"],
+  "cases": [
+    {"id":"extract-a","category":"extraction","prompt":"From this public sample: stage=alpha; ticket=FJ-204; state=open. Return only the ticket value.","expected":"FJ-204","scorer":"strip_exact"},
+    {"id":"extract-b","category":"extraction","prompt":"A public record says colour=amber, code=R8-17, amount=5. Return only the code value.","expected":"R8-17","scorer":"strip_exact"},
+    {"id":"extract-c","category":"extraction","prompt":"Read this public manifest: unit=4 | route=WEST | slot=2. Return only the route value.","expected":"WEST","scorer":"strip_exact"},
+    {"id":"extract-d","category":"extraction","prompt":"Public tags: owner=team-3; tag=delta; priority=low. Return only the tag value.","expected":"delta","scorer":"strip_exact"},
+    {"id":"extract-e","category":"extraction","prompt":"Read this public note: batch=KM42, group=desk, count=9. Return only the batch value.","expected":"KM42","scorer":"strip_exact"},
+    {"id":"extract-f","category":"extraction","prompt":"Public input: region=NE; speed=normal; revision=5. Return only the region value.","expected":"NE","scorer":"strip_exact"},
+    {"id":"format-a","category":"formatting","prompt":"Format the date 2028-02-29 as Month D, YYYY (English). Return only the formatted date.","expected":"February 29, 2028","scorer":"strip_exact"},
+    {"id":"format-b","category":"formatting","prompt":"Format 2030-12-05 as Month D, YYYY (English). Return only the formatted date.","expected":"December 5, 2030","scorer":"strip_exact"},
+    {"id":"format-c","category":"formatting","prompt":"Format 2031-01-09 as Month D, YYYY (English). Return only the formatted date.","expected":"January 9, 2031","scorer":"strip_exact"},
+    {"id":"format-d","category":"formatting","prompt":"Sort the integers 8, 2, 11, 3 ascending; return comma-separated integers without spaces.","expected":"2,3,8,11","scorer":"strip_exact"},
+    {"id":"format-e","category":"formatting","prompt":"Sort integers 30, 7, 100, 9 ascending; return comma-separated integers without spaces.","expected":"7,9,30,100","scorer":"strip_exact"},
+    {"id":"format-f","category":"formatting","prompt":"Convert 'harbor lane' to uppercase ASCII letters. Return the converted string only.","expected":"HARBOR LANE","scorer":"strip_exact"},
+    {"id":"math-a","category":"arithmetic","prompt":"Calculate 236 + 487. Return only the integer.","expected":"723","scorer":"strip_exact"},
+    {"id":"math-b","category":"arithmetic","prompt":"Calculate 19 * 23. Return only the integer.","expected":"437","scorer":"strip_exact"},
+    {"id":"math-c","category":"arithmetic","prompt":"Calculate 1500 - 678. Return only the integer.","expected":"822","scorer":"strip_exact"},
+    {"id":"math-d","category":"arithmetic","prompt":"Calculate 3 * 8 + 7 using normal arithmetic precedence. Return only the integer.","expected":"31","scorer":"strip_exact"},
+    {"id":"math-e","category":"arithmetic","prompt":"Calculate 240 / 6. Return only the integer.","expected":"40","scorer":"strip_exact"},
+    {"id":"math-f","category":"arithmetic","prompt":"Calculate 17 squared. Return only the integer.","expected":"289","scorer":"strip_exact"},
+    {"id":"code-a","category":"code_reading","prompt":"Python: x=[1,2]; y=x; x += [3]; print(len(y)). What is printed? Return only the integer.","expected":"3","scorer":"strip_exact"},
+    {"id":"code-b","category":"code_reading","prompt":"Python: x=[1,2]; y=x; x=x+[3]; print(len(y)). What is printed? Return only the integer.","expected":"2","scorer":"strip_exact"},
+    {"id":"code-c","category":"code_reading","prompt":"Python: data={'a':[1]}; copied=data.copy(); copied['a'].append(3); print(len(data['a'])). What is printed? Return only the integer.","expected":"2","scorer":"strip_exact"},
+    {"id":"code-d","category":"code_reading","prompt":"Python: nums=[1,2,3]; print(sum(n*n for n in nums if n%2)). What is printed? Return only the integer.","expected":"10","scorer":"strip_exact"},
+    {"id":"code-e","category":"code_reading","prompt":"Python: values=(4,8,12); print(values[1]//2). What is printed? Return only the integer.","expected":"4","scorer":"strip_exact"},
+    {"id":"code-f","category":"code_reading","prompt":"Python: d={'a':1,'b':2}; print(sorted(d)[-1]). What is printed? Return only the character.","expected":"b","scorer":"strip_exact"}
+  ]
+}
