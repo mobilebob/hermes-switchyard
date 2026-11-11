@@ -17,6 +17,10 @@ def main():
     assert os.environ["HERMES_PROFILE"] == "default"
     assert home.is_relative_to(Path(os.environ["TMPDIR"]))
     socket.socket.connect = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("No sockets"))
+    if scenario == "shadow-native-named":
+        home = home / "profiles/fixture-named"
+        home.mkdir(parents=True)
+        os.environ["HERMES_HOME"] = str(home)
     installed = home / "plugins/hermes-switchyard"
     installed.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive) as source:
@@ -80,6 +84,7 @@ def main():
     observer: Any = controller.model_shadow
     context = {
         "session_id": "public-session", "task_id": "public-task", "turn_id": "public-turn",
+        "api_request_id": "public-request", "base_url": "https://api.example.com/v1",
         "model": "gpt-6-sol", "provider": "openai-codex", "api_mode": "codex_responses",
         "platform": "cli", "parent_session_id": None,
         "manual_model_pinned": False, "model_account": "fixture-account",
@@ -114,15 +119,55 @@ def main():
     request = {"model": "gpt-6-sol", "input": [{"role": "user", "content": task}], "reasoning": {"effort": "high"}}
     original = copy.deepcopy(request)
     before = len(calls)
-    dispatched = apply_llm_request_middleware(request, **context)
-    assert dispatched.payload == original and request == original
+    if scenario.startswith("shadow-native-"):
+        from native_request_probe import build_native_request
+        if scenario in {"shadow-native-pin", "shadow-native-clear"}:
+            from gateway.config import GatewayConfig, Platform
+            from gateway.session import SessionSource, SessionStore
+            store = SessionStore(home / "sessions", GatewayConfig())
+            entry = store.get_or_create_session(SessionSource(platform=Platform.LOCAL, chat_id="fixture-cli"))
+            store.set_model_override(entry.session_key, {"model": "gpt-6-sol", "provider": "openai-codex"})
+            assert store.get_model_override(entry.session_key) is not None
+            if scenario == "shadow-native-clear":
+                store.set_model_override(entry.session_key, None)
+                assert store.get_model_override(entry.session_key) is None
+        outgoing, native = build_native_request(request, context, pinned=scenario == "shadow-native-pin")
+        assert "manual_model_pinned" not in native and "model_account" not in native
+        if scenario == "shadow-native-provider":
+            changed = {**context, "provider": "another-provider", "api_request_id": "retry-request"}
+            first_route = observer.receipts[-1]["native_provenance"]["route_sha256"]
+            outgoing, native = build_native_request(request, changed)
+            assert observer.receipts[-1]["native_provenance"]["route_sha256"] != first_route
+        if scenario == "shadow-native-account":
+            first_route = observer.receipts[-1]["native_provenance"]["route_sha256"]
+            outgoing, native = build_native_request(request, {**context, "api_request_id": "account-retry"}, credential_entry="another-fixture-entry")
+            assert observer.receipts[-1]["native_provenance"]["route_sha256"] == first_route
+            assert "provider_account" in observer.receipts[-1]["native_provenance"]["missing"]
+        if scenario == "shadow-native-missing":
+            outgoing, native = build_native_request(request, {**context, "api_request_id": ""})
+            assert observer.receipts[-1]["reason"] == "native_request_provenance_incomplete"
+        if scenario == "shadow-native-conflict":
+            outgoing, native = build_native_request(request, {**context, "session_id": "rotated-session"})
+            assert observer.receipts[-1]["reason"] == "native_attempt_conflict"
+        if scenario == "shadow-native-cancel-retry":
+            manager.invoke_hook("agent_loop_stopped", session_key="public-session", reason="cancelled")
+            outgoing, native = build_native_request(request, context)
+            assert observer.receipts[-1]["reason"] == "native_attempt_cancelled"
+            outgoing, native = build_native_request(request, {**context, "api_request_id": "fresh-retry"})
+            assert observer.receipts[-1]["reason"] == "pin_provenance_unavailable"
+        if scenario == "shadow-native-named":
+            assert observer.receipts[-1]["native_provenance"]["profile"] == "fixture-named"
+        assert outgoing == original and request == original
+    else:
+        dispatched = apply_llm_request_middleware(request, **context)
+        assert dispatched.payload == original and request == original
     assert len(calls) == before  # The shadow observer has no network/client seam.
     receipt = observer.receipts[-1] if observer else None
-    if scenario == "shadow-success":
+    if scenario == "shadow-unqualified":
         assert receipt is not None
-        assert receipt["status"] == "proposed" and receipt["proposed"]["model"] == "gpt-6-luna", receipt
-        apply_llm_request_middleware(request, **context)
-        assert sum(value["status"] == "proposed" for value in observer.receipts) == 1
+        assert receipt["status"] == "abstained" and receipt["proposed"] is None, receipt
+        assert receipt["reason"] == "pin_provenance_unavailable", receipt
+        assert receipt["native_provenance"]["source"] == "hermes-request-context"
         assert len(calls) == 1
     elif scenario == "shadow-off":
         assert observer is None

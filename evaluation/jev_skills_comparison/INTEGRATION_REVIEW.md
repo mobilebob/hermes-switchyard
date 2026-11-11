@@ -56,6 +56,20 @@ is unavailable. Trusted native manual-pin and account provenance are mandatory,
 and hosts lacking those fields abstain. Offline/native-artifact tests establish
 non-mutation and zero additional fixture requests, not production readiness.
 
+## Native provenance qualification
+
+The read-only adapter now qualifies the actual native middleware fields and
+public effective-home/profile API. Both inspected sources lack a supported
+request-scoped manual-pin/account export. Flat plugin-generated claims are
+rejected, not promoted to host authority. Actual native eligibility has **not**
+increased. The real request builder, gateway selection/clear persistence and
+profile ContextVars are exercised with disposable state; consumer-only positive
+fixtures are explicitly synthetic and are not native compatibility evidence.
+See [the discovery/qualification matrix](../../docs/NATIVE-PROVENANCE.md).
+
+The next retrieval capability has a [concrete design only](../../docs/MEMORY-RELEVANCE-INJECTION-DESIGN.md).
+No memory-filter code is implemented in this checkpoint.
+
 ## Reviewed implementations
 
 - Switchyard starting revision: `77a6d3a62a9d41d6e8dac140fdcce924253342be`.

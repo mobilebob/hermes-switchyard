@@ -11,6 +11,20 @@ from hermes_switchyard import egress_redaction
 from hermes_switchyard.client import DecisionClient, EXPECTED_MODEL
 from hermes_switchyard.model_policy import recommend_approved_model
 from hermes_switchyard.model_routing_shadow import ModelRoutingShadow
+from hermes_switchyard.native_provenance import NativeSnapshot
+
+
+class SyntheticContractProvenance:
+    """Synthetic policy contract only, explicitly NOT native qualification."""
+    def profile(self):
+        return (ModelRoutingShadow.digest("contract-fixture"), "fixture")
+
+    def invalidate(self):
+        pass
+
+    def read(self, request, context):
+        return NativeSnapshot(context, self.profile(), None, None,
+                              source="synthetic-policy-contract", missing=())
 
 
 class ShadowRoutingTests(unittest.TestCase):
@@ -40,6 +54,7 @@ class ShadowRoutingTests(unittest.TestCase):
     def make(self, mode: object = "shadow"):
         return ModelRoutingShadow(
             mode=mode, identity_factory=lambda: self.identity,
+            native_provenance=SyntheticContractProvenance(),
             registry_factory=lambda: (self.rows, self.version, self.expiry),
         )
 

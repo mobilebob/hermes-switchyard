@@ -54,6 +54,16 @@ that arrive after cancellation. Unsupported cleanup registration disables reuse.
 
 ## Trusted runtime gates
 
+The [native provenance adapter](NATIVE-PROVENANCE.md) now reads only fields
+actually exported by the native request builder and the public effective-profile
+API. Current inspected hosts do **not** export manual-pin/account authority.
+Flat pin/account kwargs, even in middleware context, are discarded rather than
+silently upgraded to native proof. Safe native shadow eligibility therefore has
+not increased; those hosts continue to abstain.
+
+The following are requirements for a future supported host provenance API,
+not permission to inject flags from a plugin or a prompt:
+
 The native request context must explicitly provide:
 
 - `manual_model_pinned: false` — a genuine host pin-state assertion, **not** an
@@ -96,8 +106,9 @@ python -m unittest discover -s tests -p 'test_shared_jev_native.py' -k shadow -v
 ## Known limitations and next step
 
 Native Hermes hosts that do not supply trusted manual-pin/account provenance will
-abstain. Tests inject these fields as synthetic **host** context; they do not
-prove that a running gateway supplies them. There is no live gateway or provider
+abstain. Consumer policy tests use explicitly synthetic provenance for their positive
+contract checks. Native builder tests add no pin/account fields; they establish
+unknown state and abstention, not positive compatibility. There is no live gateway or provider
 qualification, latency/billing measurement, automatic model-fit call, multi-step
 request qualification, cross-provider routing, or apply implementation.
 

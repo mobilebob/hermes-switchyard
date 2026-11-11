@@ -17,6 +17,7 @@ import time
 from typing import Any, Callable
 
 from .model_policy import _parse_deadline, _validate_registry
+from .native_provenance import NativeProvenanceAdapter
 from .reasoning_effort_adapter import _task_scan
 
 
@@ -25,8 +26,9 @@ class ModelRoutingShadow:
     MAX_AGE = 30.0
     DEADLINE = 0.4
 
-    def __init__(self, *, mode: Any, identity_factory: Callable[[], Any], registry_factory: Callable[[], Any]):
+    def __init__(self, *, mode: Any, identity_factory: Callable[[], Any], registry_factory: Callable[[], Any], native_provenance=None):
         self.mode = mode if mode in ("off", "shadow", "apply") else "off"
+        self.native_provenance = native_provenance or NativeProvenanceAdapter()
         self.identity_factory: Callable[[], Any] = identity_factory
         self.registry_factory: Callable[[], Any] = registry_factory
         self.captures = OrderedDict()
@@ -35,10 +37,12 @@ class ModelRoutingShadow:
         self.lock = threading.RLock()
         self.status = {"mode": self.mode, "apply_available": False, "last_receipt": None}
 
-    @staticmethod
-    def key(context):
+    def key(self, context):
         key = tuple(context.get(name) for name in ("session_id", "task_id", "turn_id"))
-        return key if all(type(value) is str and value.strip() for value in key) else None
+        if not all(type(value) is str and value.strip() for value in key):
+            return None
+        profile = self.native_provenance.profile()
+        return ((profile[0] if profile else None), *key)
 
     @staticmethod
     def digest(value):
@@ -47,7 +51,7 @@ class ModelRoutingShadow:
     def identity(self):
         try:
             route = self.identity_factory()
-            return self.digest(route) if isinstance(route, Mapping) else None
+            return self.digest((route, self.native_provenance.profile())) if isinstance(route, Mapping) else None
         except Exception:
             return None
 
@@ -83,6 +87,7 @@ class ModelRoutingShadow:
         with self.lock:
             self.captures.clear()
             self.pending.clear()
+            self.native_provenance.invalidate()
 
     def capture(self, *, user_message=None, **context):
         if self.mode != "shadow":
@@ -94,7 +99,7 @@ class ModelRoutingShadow:
         with self.lock:
             # Each new capture supersedes in-flight offers, including same turn.
             for previous in list(self.captures):
-                if previous[:2] == key[:2]:
+                if previous[:-1] == key[:-1]:
                     self.captures.pop(previous, None)
                     self.pending.pop(previous, None)
             if (context.get("parent_session_id") not in (None, "")
@@ -156,6 +161,8 @@ class ModelRoutingShadow:
         """Record only; intentionally never accepts a request mutation callback."""
         if self.mode == "off":
             return
+        native = self.native_provenance.read(request, context)
+        context = native.context
         key = self.key(context)
         with self.lock:
             ticket = self.pending.pop(key, None)
@@ -166,6 +173,8 @@ class ModelRoutingShadow:
                 reason = "apply_unavailable"
             elif consent is not True:
                 reason = "consent_required"
+            elif native.reason is not None:
+                reason = native.reason
             elif context.get("manual_model_pinned") is True:
                 reason = "manual_model_pin"
             elif context.get("manual_model_pinned") is not False:
@@ -205,5 +214,6 @@ class ModelRoutingShadow:
                 "reason": reason, "proposed": proposed, "applied": False,
                 "can_apply": False, "new_jev_requests": 0,
                 "scope_sha256": self.digest(key) if key else None,
+                "native_provenance": native.receipt(),
             })
             self.status["last_receipt"] = self.receipts[-1]
