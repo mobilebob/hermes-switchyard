@@ -19,6 +19,10 @@ SCENARIOS = (
     "outage", "stale", "route-before", "route-inflight", "route-after",
     "large", "deadline", "stage-two", "stage-two-failure", "unload", "no-skill", "private", "consume-once",
     "stage-two-after-shared", "failed-stage-two-after-shared", "concurrent-inflight",
+    "shadow-success", "shadow-off", "shadow-apply", "shadow-pin", "shadow-unknown-pin",
+    "shadow-provider", "shadow-account", "shadow-identity", "shadow-cancel",
+    "shadow-cancel-inflight", "shadow-stale", "shadow-unavailable", "shadow-private",
+    "shadow-observer-failure",
 )
 
 
@@ -48,7 +52,7 @@ class SharedJevNativeTests(unittest.TestCase):
             }
             commands = []
             # A second fresh interpreter checks installed defaults after restart.
-            for _ in range(2 if scenario == "default-off" else 1):
+            for _ in range(2 if scenario in {"default-off", "shadow-off"} else 1):
                 completed = subprocess.run(
                     [sys.executable, str(ROOT / "tests/shared_jev_native_worker.py"),
                      str(self.archive), scenario],

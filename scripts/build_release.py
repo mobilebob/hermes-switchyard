@@ -94,6 +94,8 @@ RELEASE_FILES = (
     "hermes_switchyard/record_triage.py",
     "hermes_switchyard/client.py",
     "hermes_switchyard/combined_decisions.py",
+    "hermes_switchyard/model_routing_shadow.py",
+    "docs/MODEL-ROUTING-SHADOW.md",
     "hermes_switchyard/source_find.py",
     "hermes_switchyard/source_bundle.py",
     "hermes_switchyard/source_prefetch.py",

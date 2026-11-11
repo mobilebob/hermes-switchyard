@@ -1601,8 +1601,10 @@ class ReasoningEffortController:
         receipt_line: Any = None,
         client_identity: Callable[[], Any] | None = None,
         shared_decisions: Any = None,
+        model_shadow: Any = None,
     ) -> None:
         self.shared_decisions = shared_decisions
+        self.model_shadow = model_shadow
         self.enabled = enabled is True
         # Deprecated: the fallback is always the request's own level.
         self.default_effort = normalize_effort(default_effort)
@@ -1736,6 +1738,12 @@ class ReasoningEffortController:
             **_kwargs: Any,
         ) -> None:
             try:
+                if self.model_shadow is not None:
+                    self.model_shadow.safely("capture",
+                        user_message=user_message, session_id=session_id,
+                        task_id=task_id, turn_id=turn_id,
+                        parent_session_id=parent_session_id, **_kwargs,
+                    )
                 if parent_session_id is not _MISSING and _identifier(parent_session_id) is not None:
                     self.discard_user_message(session_id=session_id, task_id=task_id)
                     return None
@@ -2544,6 +2552,10 @@ class ReasoningEffortController:
         receipt line. The line is for the user, so the model never gets it back.
         """
         raw_request = request if isinstance(request, Mapping) else {}
+        if self.model_shadow is not None:
+            self.model_shadow.safely("observe",
+                raw_request, consent=self.public_or_sanitized_data_ack, **context
+            )
         try:
             cleaned = strip_receipt_lines(raw_request)
         except Exception:  # noqa: BLE001 -- a display guard never breaks a request
@@ -3344,6 +3356,7 @@ def register_reasoning_effort_adapter(
     client_identity: Callable[[], Any] | None = None,
     register_llm_request: bool = True,
     shared_decisions: Any = None,
+    model_shadow: Any = None,
 ) -> dict[str, Any]:
     """Register llm_request middleware, turn and tool hooks, and ``/switchyard``."""
     global _LAST_REGISTRATION, _ACTIVE_LLM_REQUEST_CALLBACK
@@ -3408,6 +3421,7 @@ def register_reasoning_effort_adapter(
         receipt_mode=settings["receipt_mode"],
         client_identity=client_identity,
         shared_decisions=shared_decisions,
+        model_shadow=model_shadow,
     )
     _ACTIVE_LLM_REQUEST_CALLBACK = controller.on_llm_request
     register_middleware = getattr(ctx, "register_middleware", None)

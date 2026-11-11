@@ -34,6 +34,7 @@ from .egress import (
 )
 from .model_policy import recommend_approved_model
 from .model_route_adapter import register_model_route_adapter
+from .model_routing_shadow import ModelRoutingShadow
 from .reasoning_effort_adapter import (
     DEFAULT_ADAPTIVE_REASONING_DEADLINE_SECONDS,
     append_effort_record,
@@ -123,6 +124,7 @@ def _publish_runtime_status(
             ),
             "hosted_construction_allowed": bool(mode == "hosted_sanitized" and ack),
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
+            "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
         }
@@ -1048,6 +1050,7 @@ def _cli_handler(args):
             "automatic_skill_jev_mode": _RUNTIME_STATUS["automatic_skill_jev_mode"],
             "hosted_construction_allowed": _RUNTIME_STATUS["hosted_construction_allowed"],
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
+            "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
             "tool_exposure": exposure,
@@ -1750,22 +1753,41 @@ def register(ctx):
         )
         and standing_ack
     )
+    shadow_mode = ctx_get_config(ctx, "model_routing_mode", default="off")
+    model_shadow = (
+        ModelRoutingShadow(
+            mode=shadow_mode, identity_factory=cache_identity,
+            registry_factory=lambda: (
+                ctx_get_config(ctx, "approved_model_registry", default=[]),
+                ctx_get_config(ctx, "approved_model_registry_version", default=""),
+                ctx_get_config(ctx, "approved_model_registry_valid_until", default=""),
+            ),
+        )
+        if shadow_mode in ("shadow", "apply") and standing_ack
+        and setting_bool("adaptive_reasoning_effort", True) else None
+    )
     shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
-    if shared_broker is not None:
+    owners = [owner for owner in (shared_broker, model_shadow) if owner is not None]
+    def invalidate_decisions(**context):
+        for owner in owners:
+            owner.invalidate(**context)
+    if owners:
         try:
             # Invalidation only: no second decision or request-mutation owner.
             for name in ("agent_loop_stopped", "on_session_end", "on_session_reset"):
-                ctx.register_hook(name, shared_broker.invalidate)
+                ctx.register_hook(name, invalidate_decisions)
             if callable(getattr(ctx, "on_unload", None)):
-                ctx.on_unload(shared_broker.invalidate)
+                ctx.on_unload(invalidate_decisions)
         except Exception:  # Without cancellation cleanup, sharing is unsafe.
-            shared_broker.invalidate()
+            invalidate_decisions()
             shared_broker = None
+            model_shadow = None
     auto_client_factory = (
         (lambda: SharedSkillClient(client(), shared_broker))
         if shared_broker is not None else client
     )
     _RUNTIME_STATUS["shared_jev_skill_effort"] = shared_broker is not None
+    _RUNTIME_STATUS["model_routing_shadow"] = model_shadow.status if model_shadow else {"mode": "off", "apply_available": False, "last_receipt": None}
     automatic_hook = build_pre_llm_call_hook(
         enabled=setting_bool("automatic_skill_recommendation", True),
         configured_candidates=ctx_get_config(ctx, "automatic_skill_candidates", default=[]),
@@ -1878,6 +1900,7 @@ def register(ctx):
         receipt_line=ctx_get_config(ctx, "adaptive_reasoning_effort_receipt_line", default=None),
         register_llm_request=(not defer_schemas_enabled),
         shared_decisions=shared_broker,
+        model_shadow=model_shadow,
     )
 
     from . import reasoning_effort_adapter as _effort_mod
@@ -2010,6 +2033,10 @@ def register(ctx):
     def approved_route_handler(args, **kwargs):
         try:
             _require_public_data_ack(args, standing=standing_ack)
+            ticket = model_shadow.safely("begin",
+                task=str(args.get("task") or ""), context=kwargs,
+                consent=_resolved_public_data_ack(args, standing_ack),
+            ) if model_shadow else None
             result = recommend_approved_model(
                 task=str(args.get("task") or ""),
                 requirements=dict(args.get("requirements") or {}),
@@ -2022,6 +2049,8 @@ def register(ctx):
                 ),
                 public_or_sanitized_data_ack=_resolved_public_data_ack(args, standing_ack),
             )
+            if model_shadow:
+                model_shadow.safely("offer", ticket, result)
             return json.dumps(result)
         except Exception as exc:  # noqa: BLE001 -- tool handlers return structured errors
             return _error(exc)

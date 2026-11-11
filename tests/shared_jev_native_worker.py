@@ -15,6 +15,9 @@ import zipfile
 
 def main():
     archive, scenario = sys.argv[1:3]
+    if scenario.startswith("shadow-"):
+        from model_routing_shadow_native_worker import main as shadow_main
+        return shadow_main()
     home = Path(os.environ["HERMES_HOME"])
     assert home.is_relative_to(Path(os.environ["TMPDIR"]))
     assert os.environ.get("HERMES_PROFILE") == "default"

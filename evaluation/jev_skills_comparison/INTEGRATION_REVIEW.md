@@ -45,6 +45,17 @@ host under test is pinned Hermes 0.21.3; production gateway delivery, hosted Jev
 quality, live latency/billing, other hosts, desktop turns and broader model/provider
 coverage are not established. No source revision or release was pushed.
 
+## Passive shadow-routing transfer
+
+The shared-decision checkpoint is followed by a minimal passive model-routing
+consumer. See [the shadow-routing guide](../../docs/MODEL-ROUTING-SHADOW.md).
+Only existing approved-registry model-selection decisions qualify; skill and
+effort outputs are never reinterpreted as model choices. The consumer adds no
+Jev request, pre-call hook or request-mutation owner. Off is the default; apply
+is unavailable. Trusted native manual-pin and account provenance are mandatory,
+and hosts lacking those fields abstain. Offline/native-artifact tests establish
+non-mutation and zero additional fixture requests, not production readiness.
+
 ## Reviewed implementations
 
 - Switchyard starting revision: `77a6d3a62a9d41d6e8dac140fdcce924253342be`.
@@ -174,7 +185,7 @@ a published source revision.
 - Resolve remaining full-tree hygiene findings rather than broadening scanner
   exemptions; preserve historical evidence and receipts unchanged.
 
-Next development step: add a pure same-provider shadow routing consumer that can
-reuse shared answers without adding another automatic hook or paid decision
-request. Explicit manual pins must win, and shadow must leave requests unchanged.
+Next development step: qualify trusted native manual-pin/account provenance for
+the passive shadow consumer. Keep apply unavailable and outgoing requests
+unchanged; do not manufacture model-fit answers from skill/effort decisions.
 The feature stays default-off until those gates and owner approval are complete.
