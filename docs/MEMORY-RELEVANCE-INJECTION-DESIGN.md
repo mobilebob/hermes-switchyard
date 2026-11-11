@@ -1,9 +1,11 @@
-# Design only: Jev-assisted memory relevance and injection filtering
+# Design record: Jev-assisted memory relevance and injection filtering
 
-**Not implemented.** Native provenance qualification establishes a safe-unknown
-boundary; it does not authorize model routing or external disclosure of memory.
-This design prepares the next transfer without introducing another retrieval
-hook, memory store, provider client or billable evaluation.
+**Shadow implementation is now present, default-off.** See the
+[memory screening guide](MEMORY-SCREENING-SHADOW.md) for the implemented contract,
+native scope bridge, qualification boundaries and remaining limitations. The
+proposal below is retained as the design record, not a live-quality claim.
+Native provenance qualification alone does not authorize model routing or
+external disclosure of memory.
 
 ## Existing owner and integration point
 

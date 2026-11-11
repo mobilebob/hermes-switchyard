@@ -35,6 +35,7 @@ from .egress import (
 from .model_policy import recommend_approved_model
 from .model_route_adapter import register_model_route_adapter
 from .model_routing_shadow import ModelRoutingShadow
+from .memory_screening import MemoryScreenShadow
 from .reasoning_effort_adapter import (
     DEFAULT_ADAPTIVE_REASONING_DEADLINE_SECONDS,
     append_effort_record,
@@ -125,6 +126,7 @@ def _publish_runtime_status(
             "hosted_construction_allowed": bool(mode == "hosted_sanitized" and ack),
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
             "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
+            "memory_screen": _RUNTIME_STATUS.get("memory_screen", {"mode": "off", "applied": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
         }
@@ -1051,6 +1053,7 @@ def _cli_handler(args):
             "hosted_construction_allowed": _RUNTIME_STATUS["hosted_construction_allowed"],
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
             "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
+            "memory_screen": _RUNTIME_STATUS.get("memory_screen", {"mode": "off", "applied": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
             "tool_exposure": exposure,
@@ -1766,8 +1769,14 @@ def register(ctx):
         if shadow_mode in ("shadow", "apply") and standing_ack
         and setting_bool("adaptive_reasoning_effort", True) else None
     )
+    memory_shadow = (
+        MemoryScreenShadow(
+            mode="shadow", identity_factory=cache_identity,
+            policy_factory=lambda: ctx_get_config(ctx, "memory_screen_policy", default={}),
+        ) if ctx_get_config(ctx, "memory_screen_mode", default="off") == "shadow" and standing_ack else None
+    )
     shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
-    owners = [owner for owner in (shared_broker, model_shadow) if owner is not None]
+    owners = [owner for owner in (shared_broker, model_shadow, memory_shadow) if owner is not None]
     def invalidate_decisions(**context):
         for owner in owners:
             owner.invalidate(**context)
@@ -1782,11 +1791,23 @@ def register(ctx):
             invalidate_decisions()
             shared_broker = None
             model_shadow = None
+            if memory_shadow is not None:
+                memory_shadow.hosting_available = False
+                memory_shadow.status["reason"] = "lifecycle_unavailable"
+    if memory_shadow is not None:
+        try:
+            ctx.register_middleware("tool_execution", memory_shadow.bind_native_scope)
+            memory_shadow.status["scope_bridge"] = True
+        except (AttributeError, TypeError, ValueError):
+            # Older native hosts still fall back locally when their handler
+            # context lacks a complete scope; no inferred turn identity.
+            memory_shadow.status["scope_bridge"] = False
     auto_client_factory = (
         (lambda: SharedSkillClient(client(), shared_broker))
         if shared_broker is not None else client
     )
     _RUNTIME_STATUS["shared_jev_skill_effort"] = shared_broker is not None
+    _RUNTIME_STATUS["memory_screen"] = memory_shadow.status if memory_shadow else {"mode": "off", "applied": False, "last_receipt": None}
     _RUNTIME_STATUS["model_routing_shadow"] = model_shadow.status if model_shadow else {"mode": "off", "apply_available": False, "last_receipt": None}
     automatic_hook = build_pre_llm_call_hook(
         enabled=setting_bool("automatic_skill_recommendation", True),
@@ -2078,6 +2099,7 @@ def register(ctx):
                 return json.dumps(
                     rerank_session_search(
                         retrieved_screen_enabled=setting_bool("retrieved_screen_enabled", False),
+                        memory_shadow=memory_shadow, memory_context=kwargs,
                         candidates=candidates,
                         query=query,
                         client=None,
@@ -2093,6 +2115,7 @@ def register(ctx):
                 return json.dumps(
                     rerank_session_search(
                         retrieved_screen_enabled=setting_bool("retrieved_screen_enabled", False),
+                        memory_shadow=memory_shadow, memory_context=kwargs,
                         query=query,
                         candidates=candidates,
                         client=active_client,

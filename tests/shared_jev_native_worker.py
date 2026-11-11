@@ -15,6 +15,9 @@ import zipfile
 
 def main():
     archive, scenario = sys.argv[1:3]
+    if scenario.startswith("memory-"):
+        from memory_screen_native_worker import main as memory_main
+        return memory_main()
     if scenario.startswith("shadow-"):
         from model_routing_shadow_native_worker import main as shadow_main
         return shadow_main()

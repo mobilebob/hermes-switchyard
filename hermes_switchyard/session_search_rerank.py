@@ -22,6 +22,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from . import receipt_state
+from .memory_screening import MemoryScreenClient
 from .retrieved_screen import anchor_preview, card_anchors, screen_shortlist
 from .client import (
     DEFAULT_OPERATION_DEADLINE_SECONDS,
@@ -631,7 +632,7 @@ def _rerank_session_search(
         )
 
 
-def rerank_session_search(*, retrieved_screen_enabled=False, **kwargs):
+def rerank_session_search(*, retrieved_screen_enabled=False, memory_shadow=None, memory_context=None, **kwargs):
     """Screen retrieved cards locally before selection, even with no provider."""
     candidates, screening = screen_shortlist(kwargs.get("candidates"))
     flagged = screening["withheld"]
@@ -639,7 +640,33 @@ def rerank_session_search(*, retrieved_screen_enabled=False, **kwargs):
         candidates = kwargs.get("candidates")
         screening["withheld"] = 0
     screening.update(mode="enforce" if retrieved_screen_enabled else "shadow", flagged=flagged)
-    result = _rerank_session_search(**{**kwargs, "candidates": candidates})
+    run = None
+    if memory_shadow is not None and memory_shadow.mode == "shadow":
+        # The same retrieval owner applies source authorization before ALL
+        # hosting, not merely before the extra screening questions.
+        try:
+            run = memory_shadow.begin(
+                query=kwargs.get("query"), candidates=candidates,
+                context=memory_context or {}, consent=kwargs.get("public_or_sanitized_data_ack", True),
+                deadline_seconds=kwargs.get("deadline_seconds", DEFAULT_OPERATION_DEADLINE_SECONDS),
+                query_limit=MAX_QUERY_CHARS,
+            )
+        except Exception:
+            memory_shadow.observer_failed()
+        if run is None or not run.plan.host_allowed:
+            kwargs["client"] = None
+        elif kwargs.get("client") is not None:
+            kwargs["client"] = MemoryScreenClient(kwargs["client"], memory_shadow, run)
+        else:
+            run.reason = "client_unavailable"
+    try:
+        result = _rerank_session_search(**{**kwargs, "candidates": candidates})
+    finally:
+        if run is not None and memory_shadow is not None:
+            try:
+                memory_shadow.finish(run)
+            except Exception:
+                memory_shadow.observer_failed()
     result["retrieved_screen"] = screening
     if screening["withheld"] and not candidates:
         result["status"] = "blocked"

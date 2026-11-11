@@ -54,6 +54,28 @@ tests, CI coverage, and honest evaluation claims. Keep this guidance aligned wit
 the contracts above and `SECURITY.md`. Sourcery's pull-request review controls
 remain in its dashboard; its legacy YAML does not configure those controls.
 
+## Offline memory-screen qualification
+
+Keep the new memory corpus separate from historical evaluation ledgers. Do not
+reset or replay those ledgers. The frozen labels and SHA-256 manifest are under
+`evaluation/memory_screening/`; the lexical transport is blind to labels/IDs and
+is deliberately not a Jev-quality measurement. With a scratch output path:
+
+```text
+python -m unittest discover -s tests -p 'test_memory*.py' -v
+python evaluation/memory_screening/holdout.py --output /path/to/scratch/memory-holdout.json
+python -m unittest discover -s tests -p 'test_shared_jev_native.py' -v
+```
+
+Native lifecycle checks require a native Hermes test environment. Run with a
+disposable `HOME`/`HERMES_HOME`, `HERMES_PROFILE=default`, no production auth files
+and blocked external sockets; the native workers also refuse socket connections.
+They install a release archive into disposable state and use a deterministic
+transport, never live Jev. An actual native tool-dispatch case qualifies the
+public tool-execution scope bridge; synthetic provider responses are not live
+quality/latency/billing evidence. Finish with the full regression suite and an
+archive built from the exact committed revision. Keep all new features default-off.
+
 ## Pull requests
 
 In the description:

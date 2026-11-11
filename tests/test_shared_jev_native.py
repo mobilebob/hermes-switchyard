@@ -26,6 +26,11 @@ SCENARIOS = (
     "shadow-native-request", "shadow-native-pin", "shadow-native-clear",
     "shadow-native-provider", "shadow-native-account", "shadow-native-named",
     "shadow-native-missing", "shadow-native-conflict", "shadow-native-cancel-retry",
+    "memory-off", "memory-shadow", "memory-policy-missing", "memory-private", "memory-claim",
+    "memory-query-private", "memory-scope", "memory-enforce", "memory-outage", "memory-cancel",
+    "memory-identity", "memory-source-change", "memory-deadline", "memory-bounds", "memory-split",
+    "memory-anchor", "memory-named", "memory-concurrent", "memory-observer-failure",
+    "memory-native-dispatch", "memory-same-turn", "memory-pii",
 )
 
 
@@ -55,7 +60,7 @@ class SharedJevNativeTests(unittest.TestCase):
             }
             commands = []
             # A second fresh interpreter checks installed defaults after restart.
-            for _ in range(2 if scenario in {"default-off", "shadow-off"} else 1):
+            for _ in range(2 if scenario in {"default-off", "shadow-off", "memory-off"} else 1):
                 completed = subprocess.run(
                     [sys.executable, str(ROOT / "tests/shared_jev_native_worker.py"),
                      str(self.archive), scenario],
