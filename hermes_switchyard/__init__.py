@@ -13,6 +13,7 @@ from typing import Any
 
 from . import receipt_history, receipt_state, schemas
 from .automatic import _config_float, build_pre_llm_call_hook, discover_mandatory_skills
+from .combined_decisions import SharedDecisionBroker, SharedSkillClient, wrap_skill_pre_hook
 from .client import (
     DEFAULT_AUTOMATIC_ROUTING_DEADLINE_SECONDS,
     DEFAULT_ENDPOINT,
@@ -53,6 +54,7 @@ _UNREGISTERED_RUNTIME_STATUS = {
     "consumer_mode": None,
     "public_or_sanitized_data_ack": None,
     "automatic_skill_jev_mode": None,
+    "shared_jev_skill_effort": False,
     "hosted_construction_allowed": False,
     "model_route_adapter": None,
     "reasoning_effort_adapter": None,
@@ -1734,6 +1736,26 @@ def register(ctx):
         # Unset profiles inherit the install default (hosted_sanitized). The
         # legacy automatic_skill_jev boolean never authorizes egress by itself.
         configured_routing_mode = DEFAULT_ROUTING_MODE
+    # Off by default. Both consumers must be active and authorize the same
+    # public/sanitized hosted task before even attempting request sharing.
+    shared_jev_skill_effort = (
+        setting_bool("shared_jev_skill_effort", False)
+        and setting_bool("automatic_skill_recommendation", True)
+        and setting_bool("adaptive_reasoning_effort", True)
+        and configured_routing_mode == "hosted_sanitized"
+        and ctx_get_config(ctx, "automatic_skill_consumer_mode", default=DEFAULT_CONSUMER_MODE) == "load"
+        and setting_bool(
+            "automatic_skill_public_or_sanitized_data_ack",
+            DEFAULT_AUTOMATIC_PUBLIC_OR_SANITIZED_DATA_ACK,
+        )
+        and standing_ack
+    )
+    shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
+    auto_client_factory = (
+        (lambda: SharedSkillClient(client(), shared_broker))
+        if shared_broker is not None else client
+    )
+    _RUNTIME_STATUS["shared_jev_skill_effort"] = shared_broker is not None
     automatic_hook = build_pre_llm_call_hook(
         enabled=setting_bool("automatic_skill_recommendation", True),
         configured_candidates=ctx_get_config(ctx, "automatic_skill_candidates", default=[]),
@@ -1743,7 +1765,7 @@ def register(ctx):
             "automatic_skill_public_or_sanitized_data_ack",
             DEFAULT_AUTOMATIC_PUBLIC_OR_SANITIZED_DATA_ACK,
         ),
-        client_factory=client,
+        client_factory=auto_client_factory,
         cache_identity=cache_identity,
         local_threshold=_config_float(
             ctx_get_config(ctx, "automatic_skill_local_threshold", default=0.20),
@@ -1803,7 +1825,11 @@ def register(ctx):
         automatic_skill_jev_mode=ctx_get_config(ctx, "automatic_skill_jev_mode", default="always"),
     )
     if automatic_hook is not None and hasattr(ctx, "register_hook"):
-        ctx.register_hook("pre_llm_call", automatic_hook)
+        ctx.register_hook(
+            "pre_llm_call",
+            wrap_skill_pre_hook(automatic_hook, shared_broker)
+            if shared_broker is not None else automatic_hook,
+        )
 
 
     # Hermes 0.19 has no model-selection apply seam. Register a safe no-op (or
@@ -1841,6 +1867,7 @@ def register(ctx):
         receipt_mode=ctx_get_config(ctx, "adaptive_reasoning_effort_receipt_mode", default=None),
         receipt_line=ctx_get_config(ctx, "adaptive_reasoning_effort_receipt_line", default=None),
         register_llm_request=(not defer_schemas_enabled),
+        shared_decisions=shared_broker,
     )
 
     from . import reasoning_effort_adapter as _effort_mod
