@@ -93,6 +93,7 @@ RELEASE_FILES = (
     "hermes_switchyard/usage_ledger.py",
     "hermes_switchyard/record_triage.py",
     "hermes_switchyard/client.py",
+    "hermes_switchyard/combined_decisions.py",
     "hermes_switchyard/source_find.py",
     "hermes_switchyard/source_bundle.py",
     "hermes_switchyard/source_prefetch.py",

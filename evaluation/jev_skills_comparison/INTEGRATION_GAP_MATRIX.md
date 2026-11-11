@@ -23,6 +23,17 @@ Source snapshots reviewed:
 - Different historical source snapshot, installed files and currently loaded
   runtime are *not* interchangeable provenance claims.
 
+## Current implementation status
+
+The earlier pilot-only description below is historical. The branch now contains
+an opt-in runtime facade in `hermes_switchyard/combined_decisions.py`; it is
+**default-off**, does not switch models, and has not been activated by this work.
+See [the current integration review](INTEGRATION_REVIEW.md) for the source-level
+capability comparison, production-broker regressions, route-binding and archive
+fixes, offline evidence boundaries, and remaining native lifecycle gates.
+The profile-aware maintenance workstream is closed; further work is integration
+only. The Stage A2 stop and accounting preservation rules remain in force.
+
 ## Capability gap matrix
 
 | Capability | Already in Switchyard | Candidate / gap | Decision & test |

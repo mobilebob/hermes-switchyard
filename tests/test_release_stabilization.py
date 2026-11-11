@@ -5,6 +5,7 @@ import io
 import json
 import math
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -707,12 +708,24 @@ class NamespaceAndAckTests(unittest.TestCase):
             with mock.patch(f"{__name__}.__file__", str(root / "tests/test_release_stabilization.py")):
                 with self.assertRaises(AssertionError):
                     self.test_release_is_canonical_only()
-                tracked.write_text("canonical text\n", encoding="utf-8")
+                # A historical receipt label is not an importable namespace.
+                tracked.write_text("live_" + forbidden + "\n", encoding="utf-8")
                 self.test_release_is_canonical_only()
+                for namespace in (
+                    "from " + forbidden + " import client",
+                    "import " + forbidden + ".client",
+                    forbidden + "/client.py",
+                    "'" + forbidden + "'",
+                ):
+                    with self.subTest(namespace=namespace):
+                        tracked.write_text(namespace, encoding="utf-8")
+                        with self.assertRaises(AssertionError):
+                            self.test_release_is_canonical_only()
 
     def test_release_is_canonical_only(self):
         root = Path(__file__).resolve().parent.parent
         forbidden = "jev" + "_decision"
+        namespace = r"(?<!\w)" + re.escape(forbidden) + r"(?!\w)"
         self.assertIn("hermes_switchyard/__init__.py", RELEASE_FILES)
         self.assertIn("hermes_switchyard/skills/hermes-switchyard-operations/SKILL.md", RELEASE_FILES)
         self.assertTrue(
@@ -728,12 +741,12 @@ class NamespaceAndAckTests(unittest.TestCase):
             path = root / relative
             if not path.is_file():
                 continue
-            self.assertNotIn(forbidden, path.as_posix())
+            self.assertNotRegex(path.as_posix(), namespace)
             try:
                 content = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
-            self.assertNotIn(forbidden, content, path.as_posix())
+            self.assertNotRegex(content, namespace, path.as_posix())
 
 
 if __name__ == "__main__":

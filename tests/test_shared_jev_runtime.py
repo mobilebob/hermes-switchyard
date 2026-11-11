@@ -40,16 +40,28 @@ class SharedJevRuntimeTests(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def run_case(self, *, enabled, identity_change=False, request_id=True,
-                 confidential=False):
-        fixture = FixtureTransport(request_id=request_id)
+                 confidential=False, inflight_identity_change=False,
+                 identity_unavailable=False, needs_skill=True, fail=False):
+        fixture = FixtureTransport(
+            request_id=request_id, needs_skill=needs_skill, fail=fail,
+        )
         identity = {"route": "synthetic"}
-        broker = SharedDecisionBroker(identity_factory=lambda: dict(identity))
+
+        def transport(payload):
+            result = fixture(payload)
+            if inflight_identity_change:
+                identity["route"] = "different-synthetic-route"
+            return result
+
+        broker = SharedDecisionBroker(
+            identity_factory=lambda: None if identity_unavailable else dict(identity)
+        )
         loads = []
 
         def client():
             return DecisionClient(
-                api_key="test-transport-only", model=EXPECTED_MODEL,
-                transport=fixture, timeout=0.4,
+                api_key="fixture-key", model=EXPECTED_MODEL,
+                transport=transport, timeout=0.4,
             )
 
         controller = ReasoningEffortController(
@@ -154,6 +166,39 @@ class SharedJevRuntimeTests(unittest.TestCase):
         self.assertEqual(actual["effort"], "low")
         self.assertEqual(len(actual["calls"]), 2)
         self.assertEqual(actual["receipts"], [])
+
+    def test_inflight_route_identity_change_does_not_rebind_old_response(self):
+        actual = self.run_case(enabled=True, inflight_identity_change=True)
+        self.assertEqual(actual["skill"]["status"], "loaded")
+        self.assertEqual(actual["effort"], "low")
+        self.assertEqual(actual["model"], "gpt-6-sol")
+        self.assertEqual(len(actual["calls"]), 2)
+        self.assertEqual(actual["receipts"], [])
+        self.assertEqual(actual["pending"], [])
+
+    def test_unknown_identity_uses_original_skill_request_without_effort_questions(self):
+        actual = self.run_case(enabled=True, identity_unavailable=True)
+        self.assertEqual(len(actual["calls"]), 2)
+        self.assertEqual(set(actual["calls"][0]["questions"]), {"skill", "needs_skill"})
+        self.assertEqual(actual["receipts"], [])
+        self.assertEqual(actual["skill"]["status"], "loaded")
+        self.assertEqual(actual["effort"], "low")
+
+    def test_no_skill_result_still_shares_effort_without_a_load(self):
+        actual = self.run_case(enabled=True, needs_skill=False)
+        self.assertEqual(len(actual["calls"]), 1)
+        self.assertEqual(actual["loads"], [])
+        self.assertEqual(actual["effort"], "low")
+        self.assertEqual(len(actual["receipts"]), 1)
+
+    def test_provider_failure_keeps_original_request_and_no_shared_receipt(self):
+        actual = self.run_case(enabled=True, fail=True)
+        self.assertEqual(actual["effort"], "high")
+        self.assertEqual(actual["model"], "gpt-6-sol")
+        # Preserve the existing local skill fallback on hosted failure.
+        self.assertEqual(actual["loads"], [("csv-skill", "test-session")])
+        self.assertEqual(actual["receipts"], [])
+        self.assertEqual(actual["pending"], [])
 
     def test_restricted_input_never_uses_shared_provider_data(self):
         actual = self.run_case(enabled=True, confidential=True)

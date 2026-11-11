@@ -20,7 +20,9 @@ from typing import Any
 
 from .reasoning_effort_adapter import _task_scan, choose_reasoning_effort
 
-_SCOPE = contextvars.ContextVar("switchyard_shared_skill_scope", default=None)
+_SCOPE: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "switchyard_shared_skill_scope", default=None
+)
 _MAX_PENDING = 32
 _MAX_AGE_SECONDS = 30.0
 
@@ -63,6 +65,7 @@ class SharedDecisionBroker:
         self.identity_factory = identity_factory
         self.records: OrderedDict[tuple[str, str, str], dict] = OrderedDict()
         self.receipts = deque(maxlen=_MAX_PENDING)
+        self.generations: OrderedDict[tuple[str, str, str], object] = OrderedDict()
         self.lock = threading.Lock()
 
     def _route_identity(self) -> str | None:
@@ -78,11 +81,35 @@ class SharedDecisionBroker:
     def clear(self, key):
         with self.lock:
             self.records.pop(key, None)
+            self.generations.pop(key, None)
 
-    def store(self, key, task, response, elapsed_ms):
+    def begin(self, key):
+        """Supersede any in-flight producer for this exact turn."""
+        generation = object()
+        with self.lock:
+            self.records.pop(key, None)
+            self.generations.pop(key, None)
+            self.generations[key] = generation
+            while len(self.generations) > _MAX_PENDING:
+                old, _ = self.generations.popitem(last=False)
+                self.records.pop(old, None)
+        return generation
+
+    def invalidate(self, **_context):
+        # Stop notifications may supply a gateway session_key, not the session_id
+        # used by decision scopes. Conservatively invalidate all bounded state.
+        # This changes no decision; other sessions simply use independent fallback.
+        with self.lock:
+            self.records.clear()
+            self.generations.clear()
+
+    def store(self, key, task, response, elapsed_ms, *, request_identity, generation):
+        # Bind the response to the identity observed BEFORE dispatch. Capturing
+        # only here would relabel an in-flight result after a route change.
         identity = self._route_identity()
         if (
-            identity is None or not isinstance(key, tuple) or len(key) != 3
+            request_identity is None or identity != request_identity
+            or not isinstance(key, tuple) or len(key) != 3
             or any(not isinstance(item, str) or not item for item in key)
             or not isinstance(task, str)
             or not isinstance(response, Mapping)
@@ -96,10 +123,13 @@ class SharedDecisionBroker:
             "task": task,
             "result": copy.deepcopy(dict(response)),
             "identity": identity,
+            "generation": generation,
             "at": time.monotonic(),
             "wall_ms": elapsed_ms,
         }
         with self.lock:
+            if generation is None or self.generations.get(key) is not generation:
+                return
             self.records.pop(key, None)
             self.records[key] = record
             while len(self.records) > _MAX_PENDING:
@@ -152,6 +182,9 @@ class SharedDecisionBroker:
         if choice.get("status") != "selected":
             return None
         with self.lock:
+            if self.generations.get(key) is not record["generation"]:
+                return None
+            self.generations.pop(key, None)
             self.receipts.append({
                 "shared_request_id": result["request_id"],
                 "cap": requested,
@@ -207,10 +240,18 @@ class SharedSkillClient:
                 return self._client.decide(state, questions, **kwargs)
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
             return self._client.decide(state, questions, **kwargs)
+        request_identity = self._broker._route_identity()
+        if request_identity is None:
+            # No reliable provenance: retain the original independent path and
+            # do not add effort questions whose answers cannot be reused.
+            return self._client.decide(state, questions, **kwargs)
         started = time.perf_counter()
         result = self._client.decide(merged_state, merged, **kwargs)
         elapsed_ms = (time.perf_counter() - started) * 1000
-        self._broker.store(scope["key"], scope["task"], result, elapsed_ms)
+        self._broker.store(
+            scope["key"], scope["task"], result, elapsed_ms,
+            request_identity=request_identity, generation=scope["generation"],
+        )
         return {
             **result,
             "answers": {key: result["answers"][key] for key in questions},
@@ -239,7 +280,7 @@ def wrap_skill_pre_hook(callback, broker: SharedDecisionBroker):
             and context.get("model") == "gpt-6-sol"
         )
         token = _SCOPE.set({
-            "key": key, "task": clean
+            "key": key, "task": clean, "generation": broker.begin(key)
         } if eligible else None)
         try:
             return callback(**context)

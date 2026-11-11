@@ -1751,6 +1751,16 @@ def register(ctx):
         and standing_ack
     )
     shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
+    if shared_broker is not None:
+        try:
+            # Invalidation only: no second decision or request-mutation owner.
+            for name in ("agent_loop_stopped", "on_session_end", "on_session_reset"):
+                ctx.register_hook(name, shared_broker.invalidate)
+            if callable(getattr(ctx, "on_unload", None)):
+                ctx.on_unload(shared_broker.invalidate)
+        except Exception:  # Without cancellation cleanup, sharing is unsafe.
+            shared_broker.invalidate()
+            shared_broker = None
     auto_client_factory = (
         (lambda: SharedSkillClient(client(), shared_broker))
         if shared_broker is not None else client
