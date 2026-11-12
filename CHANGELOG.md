@@ -2,6 +2,12 @@
 
 ## Unreleased — optional Jev accounting and runtime evidence
 
+- Add default-off, shadow-only web screening inside the existing tool-result
+  owner. Separate relevance, sufficiency and injection observations never alter
+  results or authorize actions. Exact operator question/source approvals and
+  privacy checks gate a single bounded additional request; automatic filtering
+  remains unavailable. Offline fixtures are not served-Jev accuracy evidence.
+
 - Add read-only `runtime-verify` provenance reporting: checkout/receipt source identity,
   user-systemd gateway PID/start timestamp where available, and revision-grouped
   post-start receipts. A match is observational, never a loaded-module attestation.

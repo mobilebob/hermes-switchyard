@@ -126,6 +126,7 @@ def _publish_runtime_status(
             "hosted_construction_allowed": bool(mode == "hosted_sanitized" and ack),
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
             "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
+            "web_screen": _RUNTIME_STATUS.get("web_screen", {"mode": "off", "applied": False, "filter_available": False}),
             "memory_screen": _RUNTIME_STATUS.get("memory_screen", {"mode": "off", "applied": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
@@ -1053,6 +1054,7 @@ def _cli_handler(args):
             "hosted_construction_allowed": _RUNTIME_STATUS["hosted_construction_allowed"],
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
             "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
+            "web_screen": _RUNTIME_STATUS.get("web_screen", {"mode": "off", "applied": False, "filter_available": False}),
             "memory_screen": _RUNTIME_STATUS.get("memory_screen", {"mode": "off", "applied": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
@@ -1704,14 +1706,30 @@ def register(ctx):
 
     from .output_pruning import OutputCompactionGuard
     from .stuck_detection import StuckDetector
+    from .web_screening import WebScreenShadow
+    web_shadow = (
+        WebScreenShadow(
+            mode="shadow", client_factory=client, identity_factory=cache_identity,
+            consent_factory=lambda: setting_bool("public_or_sanitized_data_ack", True)
+            and ctx_get_config(ctx, "web_screen_mode", default="off") == "shadow",
+            policy_factory=lambda: ctx_get_config(ctx, "web_screen_policy", default={})
+            if setting_bool("public_or_sanitized_data_ack", True)
+            and ctx_get_config(ctx, "web_screen_mode", default="off") == "shadow" else {},
+        ) if standing_ack and ctx_get_config(ctx, "web_screen_mode", default="off") == "shadow" else None
+    )
     if callable(getattr(ctx, "register_hook", None)):
         pruning = setting_bool("repeated_output_compaction", False)
         stuck = StuckDetector(client) if standing_ack and setting_bool("cross_tool_stuck_detection", False) else None
         output_guard = OutputCompactionGuard() if pruning else None
         if pruning:
             ctx.register_hook("pre_llm_call", output_guard.capture)
-        if pruning or stuck:
+        if pruning or stuck or web_shadow is not None:
             def transform_result(**kwargs):
+                if web_shadow is not None:
+                    try:
+                        web_shadow(**kwargs)  # Observation only; never consume a replacement.
+                    except Exception:
+                        pass  # Observer failure cannot replace the native tool result.
                 advice = stuck(**kwargs) if stuck is not None and setting_bool("cross_tool_stuck_detection", False) and setting_bool("public_or_sanitized_data_ack", True) else None
                 return advice if advice is not None else output_guard.prune(**kwargs) if output_guard is not None else None
             ctx.register_hook("transform_tool_result", transform_result)
@@ -1776,7 +1794,7 @@ def register(ctx):
         ) if ctx_get_config(ctx, "memory_screen_mode", default="off") == "shadow" and standing_ack else None
     )
     shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
-    owners = [owner for owner in (shared_broker, model_shadow, memory_shadow) if owner is not None]
+    owners = [owner for owner in (shared_broker, model_shadow, memory_shadow, web_shadow) if owner is not None]
     def invalidate_decisions(**context):
         for owner in owners:
             owner.invalidate(**context)
@@ -1791,6 +1809,9 @@ def register(ctx):
             invalidate_decisions()
             shared_broker = None
             model_shadow = None
+            if web_shadow is not None:
+                web_shadow.hosting_available = False
+                web_shadow.status["reason"] = "lifecycle_unavailable"
             if memory_shadow is not None:
                 memory_shadow.hosting_available = False
                 memory_shadow.status["reason"] = "lifecycle_unavailable"
@@ -1807,6 +1828,7 @@ def register(ctx):
         if shared_broker is not None else client
     )
     _RUNTIME_STATUS["shared_jev_skill_effort"] = shared_broker is not None
+    _RUNTIME_STATUS["web_screen"] = web_shadow.status if web_shadow else {"mode": "off", "applied": False, "filter_available": False, "last_receipt": None}
     _RUNTIME_STATUS["memory_screen"] = memory_shadow.status if memory_shadow else {"mode": "off", "applied": False, "last_receipt": None}
     _RUNTIME_STATUS["model_routing_shadow"] = model_shadow.status if model_shadow else {"mode": "off", "apply_available": False, "last_receipt": None}
     automatic_hook = build_pre_llm_call_hook(

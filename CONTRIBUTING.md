@@ -76,6 +76,17 @@ public tool-execution scope bridge; synthetic provider responses are not live
 quality/latency/billing evidence. Finish with the full regression suite and an
 archive built from the exact committed revision. Keep all new features default-off.
 
+## Offline web-screen qualification
+
+The independent frozen corpus and integrity manifest live under
+`evaluation/web_screening/`. Do not change labels to improve fixture scores.
+Run `python -m unittest discover -s tests -p 'test_web_screen*.py' -v`,
+then `python evaluation/web_screening/evaluate.py --output /path/to/scratch/web-holdout.json`.
+The evaluator uses a label-blind lexical response fixture, not live Jev.
+Packaged web lifecycle tests use disposable native homes and blocked sockets.
+Finish with the complete suite and exact-commit release verification, as for
+memory screening. No live quality, latency or cost claims follow from fixtures.
+
 ## Pull requests
 
 In the description:
