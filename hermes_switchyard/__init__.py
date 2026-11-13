@@ -1673,10 +1673,15 @@ def register(ctx):
         # credentials are required at call time, not to advertise the tool.
         return sys.platform in {"win32", "darwin", "linux"}
 
-    def cache_identity():
+    def cache_identity(active_client=None):
         """Return live route scope with only a one-way credential generation."""
-        endpoint, model, provider = _route()
-        credential = _secret(provider)
+        if active_client is None:
+            endpoint, model, provider = _route()
+            credential = _secret(provider)
+        else:
+            endpoint, model = active_client.endpoint, active_client.model
+            provider = "typesafe" if endpoint == TYPESAFE_ENDPOINT else "openrouter"
+            credential = active_client.api_key
         credential_sha256 = hashlib.sha256(
             f"hermes-switchyard:{provider}:".encode("utf-8")
             + credential.encode("utf-8")
@@ -1793,7 +1798,9 @@ def register(ctx):
             policy_factory=lambda: ctx_get_config(ctx, "memory_screen_policy", default={}),
         ) if ctx_get_config(ctx, "memory_screen_mode", default="off") == "shadow" and standing_ack else None
     )
-    shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
+    shared_broker = SharedDecisionBroker(
+        identity_factory=cache_identity, client_identity_factory=cache_identity,
+    ) if shared_jev_skill_effort else None
     owners = [owner for owner in (shared_broker, model_shadow, memory_shadow, web_shadow) if owner is not None]
     def invalidate_decisions(**context):
         for owner in owners:

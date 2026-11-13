@@ -61,16 +61,21 @@ def _effort_parts(task: str, cap: str):
 class SharedDecisionBroker:
     """Bounded consume-once cache. Records never leave this Python process."""
 
-    def __init__(self, *, identity_factory: Callable[[], Any]):
+    def __init__(self, *, identity_factory: Callable[[], Any], client_identity_factory=None):
         self.identity_factory = identity_factory
+        self.client_identity_factory = client_identity_factory
         self.records: OrderedDict[tuple[str, str, str], dict] = OrderedDict()
         self.receipts = deque(maxlen=_MAX_PENDING)
         self.generations: OrderedDict[tuple[str, str, str], object] = OrderedDict()
         self.lock = threading.Lock()
 
-    def _route_identity(self) -> str | None:
+    def _route_identity(self, client=None) -> str | None:
         try:
-            identity = self.identity_factory()
+            identity = (
+                self.client_identity_factory(client)
+                if client is not None and self.client_identity_factory is not None
+                else self.identity_factory()
+            )
             if not isinstance(identity, Mapping):
                 return None
             raw = json.dumps(identity, sort_keys=True, allow_nan=False)
@@ -201,6 +206,10 @@ class SharedSkillClient:
     def __init__(self, client: Any, broker: SharedDecisionBroker):
         self._client = client
         self._broker = broker
+        # A live route snapshot at dispatch is not proof of which client owns
+        # this request. Bind the actual client's immutable route/credential
+        # snapshot before any preparation can race with a configuration change.
+        self._identity = broker._route_identity(client)
 
     def __getattr__(self, name):
         return getattr(self._client, name)
@@ -240,8 +249,8 @@ class SharedSkillClient:
                 return self._client.decide(state, questions, **kwargs)
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
             return self._client.decide(state, questions, **kwargs)
-        request_identity = self._broker._route_identity()
-        if request_identity is None:
+        request_identity = self._identity
+        if request_identity is None or request_identity != self._broker._route_identity():
             # No reliable provenance: retain the original independent path and
             # do not add effort questions whose answers cannot be reused.
             return self._client.decide(state, questions, **kwargs)

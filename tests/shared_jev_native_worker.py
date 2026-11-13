@@ -103,7 +103,9 @@ def main():
         return {"model": EXPECTED_MODEL, "answers": answers, "usage": {}, "request_id": f"fixture-{number}"}
 
     def client_factory(**_kwargs):
-        return DecisionClient(api_key="fixture-key", model=EXPECTED_MODEL, transport=transport, timeout=2)
+        active = DecisionClient(api_key="fixture-key", model=EXPECTED_MODEL, transport=transport, timeout=2)
+        active._fixture_identity = dict(route)
+        return active
 
     manager = get_plugin_manager()
     manager.discover_and_load(force=True)
@@ -121,6 +123,7 @@ def main():
     if controller.shared_decisions is not None:
         brokers.append(controller.shared_decisions)
         brokers[0].identity_factory = lambda: dict(route)
+        brokers[0].client_identity_factory = lambda active: dict(active._fixture_identity)
     assert manager._middleware.get("llm_request")
     assert plugin._RUNTIME_STATUS["shared_jev_skill_effort"] is (scenario != "default-off")
     context = dict(session_id="public-session", task_id="public-task", turn_id="public-turn", model="gpt-6-sol", platform="cli", parent_session_id=None, user_message=task)
