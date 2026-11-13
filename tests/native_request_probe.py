@@ -25,6 +25,8 @@ def build_native_request(request, context, *, pinned=False, credential_entry="fi
         model=context["model"], provider=context["provider"], base_url=context["base_url"],
         api_mode=context["api_mode"], session_id=context["session_id"], platform="cli",
         tools=[], max_tokens=1024, _empty_content_retries=0, _is_user_initiated_turn=False,
+        # Fresh text-only native agent state; keep the real image sanitizer.
+        _image_rejecting_models=set(),
         _explicit_model_override=pinned, _credential_pool_entry_id=credential_entry,
         _reset_stream_delivery_tracking=lambda: None,
         _reapply_reasoning_echo_for_provider=lambda *_args: None,

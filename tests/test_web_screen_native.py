@@ -16,7 +16,7 @@ SCENARIOS = (
     'web-off', 'web-search', 'web-extract', 'web-private', 'web-no-consent',
     'web-policy-missing', 'web-apply', 'web-outage', 'web-cancel',
     'web-consent-revoke', 'web-source-change', 'web-observer-failure',
-    'web-duplicate', 'web-coexist', 'web-local-rejection', 'web-missing-scope',
+    'web-duplicate', 'web-coexist', 'web-local-rejection', 'web-missing-scope', 'web-integrated',
 )
 
 

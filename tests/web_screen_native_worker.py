@@ -51,6 +51,19 @@ def main():
         settings['web_screen_mode'] = 'apply' if scenario == 'web-apply' else 'shadow'
     if scenario == 'web-coexist':
         settings.update(repeated_output_compaction=True, cross_tool_stuck_detection=True)
+    if scenario == 'web-integrated':
+        from integrated_features_native_worker import memory_case
+        _, memory_policy = memory_case(question)
+        settings.update(automatic_skill_recommendation=True, adaptive_reasoning_effort=True,
+                        shared_jev_skill_effort=True, model_routing_mode='shadow', memory_screen_mode='shadow',
+                        memory_screen_policy=memory_policy,
+                        automatic_skill_routing_mode='hosted_sanitized', automatic_skill_consumer_mode='load',
+                        automatic_skill_public_or_sanitized_data_ack=True, automatic_skill_jev_mode='always',
+                        automatic_skill_two_stage_enabled=False, automatic_skill_deadline_seconds=2.0,
+                        automatic_skill_candidates=[{'name': 'csv-skill', 'description': 'Public telescope archive CSV'}])
+        skill = home / 'skills/csv-skill/SKILL.md'
+        skill.parent.mkdir(parents=True)
+        skill.write_text('---\nname: csv-skill\ndescription: Public telescope archive CSV\n---\n\nPUBLIC INTEGRATED SKILL BODY\n')
     (home/'config.yaml').write_text(yaml.safe_dump({'plugins': {'enabled': ['hermes-switchyard'],
         'entries': {'hermes-switchyard': {'settings': settings}}}}))
     manager = get_plugin_manager()
@@ -63,6 +76,10 @@ def main():
     module = sys.modules[plugin.__name__ + '.web_screening']
     client_module = sys.modules[plugin.__name__ + '.client']
     sys.modules[plugin.__name__ + '.egress_redaction']._reset_for_tests(lambda value: value, loaded=True)
+    if scenario == 'web-integrated':
+        from integrated_features_native_worker import exercise
+        exercise(manager, plugin, settings, question, source, tool, args, result, home)
+        return
     assert not manager.has_middleware('llm_request')
     assert not manager._middleware.get('tool_execution')
     assert len(manager.iter_hook_callbacks('pre_llm_call')) == (1 if scenario == 'web-coexist' else 0)

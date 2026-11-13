@@ -643,7 +643,11 @@ class ApprovalScopeTests(unittest.TestCase):
                 result = pre_tool_gate(tool_name="terminal", args={"command": command})
                 assert result is not None
                 self.assertNotIn(secret, result["message"])
-                self.approval_previews(command, expected=expected, canaries=(secret,))
+                # Exercise residual detection independently of the installed
+                # egress scrubber's evolving support for nested JSON. The
+                # final native display redactor remains real.
+                self.approval_previews(command, host_scrubber=False,
+                                       expected=expected, canaries=(secret,))
 
     def test_escaped_credential_controls_keep_display_outcomes(self):
         secret = "orch" + "id"
@@ -749,7 +753,13 @@ class ApprovalScopeTests(unittest.TestCase):
         for name, tool, text in self.residual_credential_cases():
             field = "code" if tool == "execute_code" else "command"
             args = {field: text}
-            with self.subTest(case=name):
+            # Qualify remaining literals, not upstream masking coverage. A
+            # newer egress scrubber completely masks some corpus inputs before
+            # this check. Keep that seam pass-through while native CLI/gateway
+            # display, denial, privacy and unique rule-key assertions stay real.
+            with self.subTest(case=name), patch(
+                "hermes_switchyard.approval_review.redact_for_jev", lambda text: (text, None),
+            ):
                 self.assert_withheld_preview(tool, args, "irreversible_operation", field, (secret,))
                 result = pre_tool_gate(tool_name=tool, args=args)
                 self.assertNotIn(secret, result["message"])

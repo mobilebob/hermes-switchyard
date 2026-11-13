@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -12,8 +13,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from hermes_switchyard.client import DecisionClient, TYPESAFE_ENDPOINT
-from hermes_switchyard.web_screening_prototype import screen_result
+_client = importlib.import_module("hermes_switchyard.client")
+DecisionClient, TYPESAFE_ENDPOINT = _client.DecisionClient, _client.TYPESAFE_ENDPOINT
+screen_result = importlib.import_module("hermes_switchyard.web_screening_prototype").screen_result
 
 CASES = Path(__file__).with_name("cases.json")
 
