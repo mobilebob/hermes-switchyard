@@ -49,6 +49,7 @@ RELEASE_FILES = (
     "docs/AUTOMATIC-INTEGRATION.md",
     "docs/ADAPTIVE-REASONING-EFFORT.md",
     "docs/SESSION-SEARCH-RERANK.md",
+    "docs/WEB-SCREENING-PROTOTYPE.md",
     "docs/SOURCE-FINDER.md",
     "docs/AWESOME-JEV-EVALUATION.md",
     "docs/VALUE-EVALUATION.md",
@@ -79,6 +80,7 @@ RELEASE_FILES = (
     "hermes_switchyard/catalog_scan.py",
     "hermes_switchyard/output_pruning.py",
     "hermes_switchyard/retrieved_screen.py",
+    "hermes_switchyard/web_screening_prototype.py",
     "hermes_switchyard/stuck_detection.py",
 
     "hermes_switchyard/browser_use.py",
@@ -93,6 +95,7 @@ RELEASE_FILES = (
     "hermes_switchyard/usage_ledger.py",
     "hermes_switchyard/record_triage.py",
     "hermes_switchyard/client.py",
+    "hermes_switchyard/combined_decisions.py",
     "hermes_switchyard/source_find.py",
     "hermes_switchyard/source_bundle.py",
     "hermes_switchyard/source_prefetch.py",
