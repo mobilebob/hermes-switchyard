@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import http.client
 import importlib.util
-import json
+
 from pathlib import Path
 import unittest
 from unittest import mock

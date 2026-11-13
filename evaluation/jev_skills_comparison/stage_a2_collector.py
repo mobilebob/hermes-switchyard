@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
+
 import json
 import os
 import random
@@ -193,7 +193,7 @@ def prepare(root: Path) -> dict:
     os.chmod(root, 0o700)
     with locked(root):
         atomic_json(root / "manifest.json", meta)
-        with connected(root) as db:
+        with connected(root):
             pass
     return meta
 

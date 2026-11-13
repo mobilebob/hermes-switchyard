@@ -73,7 +73,7 @@ class UsageLedgerTests(unittest.TestCase):
         self.assertEqual(usage_ledger.report(days=30, data_dir=self.root, now=NOW)["begin_count"], 1)
 
     def test_malformed_records_never_hide_unknowns_or_text(self):
-        attempt = usage_ledger.begin("typesafe", data_dir=self.root, now=NOW, force=True)
+        usage_ledger.begin("typesafe", data_dir=self.root, now=NOW, force=True)
         with (self.root / usage_ledger.FILENAME).open("ab") as handle:
             handle.write(b'{"private":"DO_NOT_ECHO"}\n')
         report = usage_ledger.report(data_dir=self.root, now=NOW)

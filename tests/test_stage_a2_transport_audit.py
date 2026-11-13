@@ -22,6 +22,7 @@ worker = import_source("stage_a2_native_worker")
 
 def sample_stream():
     max_stream_retries, model = 1, "test"
+    assert max_stream_retries == 1
     return model
 
 

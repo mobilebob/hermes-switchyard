@@ -112,7 +112,9 @@ def main(args) -> None:
         raise RuntimeError("Invalid single-request public study contract")
     model = model_id.split(":", 1)[1]
     # Verify the imported modules, including the source that owns native retries.
-    import agent.client_lifecycle, agent.codex_runtime, agent.chat_completion_helpers
+    import agent.client_lifecycle
+    import agent.codex_runtime
+    import agent.chat_completion_helpers
     from hermes_cli.env_loader import hydrate_profile_secret_sources
     from agent.secret_scope import build_profile_secret_scope, set_secret_scope
     from hermes_cli.runtime_provider import resolve_runtime_provider

@@ -91,7 +91,7 @@ class CombinedDecisionContractTests(unittest.TestCase):
             pilot.PRE.reset(token)
 
     def test_first_stage_combines_one_provider_call(self):
-        result = self.run_decide()
+        self.run_decide()
         self.assertEqual(len(self.calls), 1)
         state, questions = self.calls[0]
         self.assertEqual(state["task"], self.TASK)
