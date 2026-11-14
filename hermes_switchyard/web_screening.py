@@ -21,9 +21,12 @@ most one new request, no retries. Bounded attempted-ID tombstones fail closed on
 saturation instead of evicting a budget and enabling a replay. Invalidation
 retains tombstones; recreate the owner at a native lifecycle boundary to reset.
 
-Whole received content/metadata/args is scanned before excerpting. Counts refer
-to the received native envelope, not full pages truncated upstream. Aggregate
-evidence describes only admitted chunks. Receipts contain counts/enums/scores,
+Whole received content/metadata/args is privacy-scanned before excerpting. Counts
+refer to the received native envelope, not full pages truncated upstream.
+coverage_complete and its explicit planned_chunk_coverage_complete alias mean
+only that all planned title/body chunks were judged, not that all delivered
+metadata/fields or upstream page bytes were judged. Aggregate evidence describes
+only admitted chunks. Receipts contain counts/enums/scores,
 no URLs/text/native IDs/hashes/provider error bodies. Lexical URL checks require
 public HTTPS without userinfo/query/fragment, plus operator public-access
 attestation. No URL fetch/DNS resolution or upstream access certification here.
@@ -46,6 +49,7 @@ import math
 import re
 import threading
 import time
+import unicodedata
 from urllib.parse import unquote, urlsplit
 
 from .client import DecisionClient, MAX_REQUEST_BYTES, host_cancel_scope, operation_remaining_deadline
@@ -85,14 +89,29 @@ class LocalOnly(ValueError):
 
 
 def safe_text(value):
+    """Inspect a bounded canonical view; never rewrite source strings or hashes.
+
+    Compose NFKC/format-control removal with at most three percent decodes and
+    one final Unicode pass. This targets obfuscation of existing privacy checks,
+    not arbitrary encodings, homoglyphs or complete DLP.
+    """
     if type(value) is not str or len(value) > MAX_RESULT_CHARS:
         raise LocalOnly("input_bounds")
     decoded = value
     for _ in range(3):
+        decoded = unicodedata.normalize("NFKC", decoded)
+        if len(decoded) > MAX_RESULT_CHARS:
+            raise LocalOnly("input_bounds")
+        decoded = "".join(char for char in decoded if unicodedata.category(char) != "Cf")
         expanded = unquote(decoded)
         if expanded == decoded:
             break
         decoded = expanded
+    # The final allowed decode can introduce width variants or format controls.
+    decoded = unicodedata.normalize("NFKC", decoded)
+    if len(decoded) > MAX_RESULT_CHARS:
+        raise LocalOnly("input_bounds")
+    decoded = "".join(char for char in decoded if unicodedata.category(char) != "Cf")
     if _EMAIL.search(decoded) or _PHONE.search(decoded) or _PRIVATE.search(decoded):
         raise LocalOnly("privacy_restricted")
     for url in _URL.findall(decoded):
@@ -121,7 +140,7 @@ def _unique_object(items):
     return result
 
 
-def bounded_data(value, *, parse=False, privacy=True) -> Any:
+def bounded_data(value, *, parse=False, privacy=True, access_checks=True, utf8_budget=False) -> Any:
     """Copy plain bounded JSON and scan all strings before any excerpt selection."""
     if parse and type(value) is str:
         if len(value) > MAX_RESULT_CHARS or len(value.encode()) > MAX_RESULT_CHARS:
@@ -149,7 +168,7 @@ def bounded_data(value, *, parse=False, privacy=True) -> Any:
             if len(item) > 4096 or any(type(key) is not str for key in item):
                 raise LocalOnly("invalid_result")
             for key, child in item.items():
-                if key.casefold() in {"authenticated", "requires_auth", "private", "sensitive", "blocked", "rejected", "blocked_by_policy"} and child:
+                if access_checks and key.casefold() in {"authenticated", "requires_auth", "private", "sensitive", "blocked", "rejected", "blocked_by_policy"} and child:
                     raise LocalOnly("source_access_unknown")
             return {walk(key, depth+1): walk(child, depth+1) for key, child in item.items()}
         if type(item) is list:
@@ -163,7 +182,7 @@ def bounded_data(value, *, parse=False, privacy=True) -> Any:
         raise LocalOnly("invalid_result")
 
     clean = walk(value)
-    if len(json.dumps(clean, allow_nan=False).encode()) > MAX_RESULT_CHARS:
+    if len(json.dumps(clean, allow_nan=False, ensure_ascii=not utf8_budget).encode()) > MAX_RESULT_CHARS:
         raise LocalOnly("input_bounds")
     if privacy:
         for text in strings:
@@ -471,7 +490,8 @@ class WebScreenShadow:
                 if evidence not in ("sufficient", "insufficient", "conflicting"):
                     raise LocalOnly("invalid_response")
                 outcome.update(reason="observed", judged=len(records), unjudged=len(chunks)-len(records),
-                               observations=records, evidence=evidence, coverage_complete=len(records)==len(chunks))
+                               observations=records, evidence=evidence, coverage_complete=len(records)==len(chunks),
+                               planned_chunk_coverage_complete=len(records)==len(chunks))
             except LocalOnly as exc:
                 outcome["reason"] = str(exc)
             except Exception:

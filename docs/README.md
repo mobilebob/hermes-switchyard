@@ -25,6 +25,7 @@ Find the right page for what you want to do. Pages near the top are for everyone
 | [Session search re-rank](SESSION-SEARCH-RERANK.md) | Reorders past-session search results | Tool only |
 | [Memory screening shadow](MEMORY-SCREENING-SHADOW.md) | Observes relevance/injection inside approved retrieval requests; never applies scores | No |
 | [Web screening shadow](WEB-SCREENING-SHADOW.md) | Observes public snippets/pages without changing results or safety decisions | No |
+| [Offline web-security remediation](WEB-SECURITY-REMEDIATION.md) | Unregistered fail-closed retrieval owner and remaining deployment gates | No |
 | [Skill description lint](LINT-SKILLS.md) | Flags skills whose descriptions are too similar to tell apart | Command only |
 | [Local observation report (`wow`)](WOW-LOCAL-REPORT.md) | Summarizes what Switchyard recorded on this machine | Command only |
 | [Offline outcome labels](OUTCOME-LABELS.md) | Labels retained receipts for offline analysis (new in 0.6.0) | Command only |

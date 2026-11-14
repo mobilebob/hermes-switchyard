@@ -282,7 +282,7 @@ def host_cancel_scope(cancel_check: Callable[[], bool] | None):
         _HOST_CANCEL_CHECK.reset(token)
 
 
-def operation_remaining_deadline() -> float | None:
+def operation_remaining_deadline(*, strict_cancel=False) -> float | None:
     """Return remaining aggregate time, or raise once the operation expires.
 
     Also raises ``HostCancelled`` when an installed host-cancel check reports
@@ -292,7 +292,9 @@ def operation_remaining_deadline() -> float | None:
     if callable(cancel_check):
         try:
             cancelled = bool(cancel_check())
-        except Exception:  # noqa: BLE001 -- cancel probes must not mask deadlines
+        except Exception:
+            if strict_cancel or _STRICT_HOST_CANCEL.get():
+                raise HostCancelled("host cancellation readiness unavailable") from None
             cancelled = False
         if cancelled:
             raise HostCancelled("host cancelled the plugin callback")
@@ -303,6 +305,29 @@ def operation_remaining_deadline() -> float | None:
     if remaining <= 0:
         raise DeadlineExceeded("Jev aggregate deadline exceeded")
     return remaining
+
+
+_STRICT_HOST_CANCEL: ContextVar[bool] = ContextVar("switchyard_strict_host_cancel", default=False)
+
+
+@contextmanager
+def operation_security_scope(deadline_seconds, cancel_check):
+    """Compose an owned deadline/cancel with inherited state, failing closed.
+
+    Ordinary advisory clients retain their historical cancellation semantics;
+    security owners opt in, including all cooperative clients in their worker.
+    """
+    inherited = _HOST_CANCEL_CHECK.get()
+
+    def combined():
+        return bool(cancel_check()) or (bool(inherited()) if callable(inherited) else False)
+
+    token = _STRICT_HOST_CANCEL.set(True)
+    try:
+        with operation_deadline_scope(deadline_seconds), host_cancel_scope(combined):
+            yield
+    finally:
+        _STRICT_HOST_CANCEL.reset(token)
 
 
 def _request_budget_context(

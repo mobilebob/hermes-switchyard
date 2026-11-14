@@ -13,11 +13,28 @@ from typing import Any
 from urllib.parse import unquote_plus
 
 MAX_TEXT = 96_000
+
+# Keep bare overrides at an operational boundary, not anywhere in prose. Literal
+# escaped newlines occur in retrieved JSON text; no general unescaping/eval is used.
+# Do not consume CR/LF at every line start: a whitespace-only page would make
+# repeated failed boundary matches rescan the suffix quadratically.
+_BOUNDARY = r"(?:(?:^|\r|\\[nr])[^\S\r\n]*|(?<=[.!?;])[^\S\r\n]+)"
+_AGENT = r"(?:assistant|chatgpt|AI\s+agent|language\s+model)"
+_ACTION = (
+    r"(?:ignore|disregard|override|disable|bypass|replace|delete|discard|forget|"
+    r"call|run|execute|invoke|read|open|visit|send|upload|post|transmit|paste|"
+    r"reveal|disclose|report|return|answer|say)"
+)
+_AGENT_COMMAND = (
+    rf"\b{_AGENT}(?:\s+(?:action|directive|instructions?|task)"
+    r"(?:\s+(?:needed|required))?)?\s*[:,!]\s*(?:please\s+)?"
+    rf"{_ACTION}\b"
+)
 _PATTERNS = (
     (
         "instruction_override",
         re.compile(
-            r"(?im)^\s*(?:attention[,:]?\s*)?(?:ignore|disregard|override)\s+"
+            rf"(?im){_BOUNDARY}(?:attention[,:]?\s*)?(?:ignore|disregard|override)\s+"
             r"(?:all\s+)?(?:previous|prior|earlier|system|developer|safety)\s+"
             r"(?:instructions?|prompts?|rules?|messages?|polic(?:y|ies))\b"
         ),
@@ -25,28 +42,85 @@ _PATTERNS = (
     (
         "role_spoof",
         re.compile(
-            r"(?im)^\s*(?:<\|(?:im_start|start_header_id)\|>\s*(?:system|developer)|"
-            r"<(?:system|developer)>|\[(?:system|developer)\]\s*(?:ignore|you|override)|"
-            r"(?:system|developer)\s*:\s*(?:ignore|disregard|override|you must))"
+            # Structural role tokens need no line start, including [im_start].
+            r"(?im)(?:<\|(?:im_start|start_header_id)\|>|\[im_start\])"
+            r"\s*(?:system|developer)\b|"
+            rf"{_BOUNDARY}(?:<(?:system|developer)>|"
+            r"\[(?:system|developer)\]\s*(?:ignore|you|override)|"
+            r"(?:system|developer)\s*:\s*(?:ignore|disregard|override|you must))|"
+            rf"<(?:system|developer)>\s*{_ACTION}\b"
+        ),
+    ),
+    ("agent_directive", re.compile(rf"(?i){_AGENT_COMMAND}")),
+    (
+        "exfil_instruction",
+        re.compile(
+            r"(?i)\b(?:before\s+(?:answering|responding)|to\s+(?:answer|respond))"
+            r"\s*[,;:]\s*(?:open|visit|send|upload|post|transmit|paste)\b"
+            r"[^\r\n]{0,500}\b(?:your\s+(?:current\s+|hidden\s+)?instructions|"
+            r"(?:hidden\s+)?system\s+prompts?|internal\s+(?:tool\s+)?state|"
+            r"API\s+keys?|credentials?|private\s+(?:files?|settings))\b"
         ),
     ),
     (
-        "agent_directive",
+        "policy_spoof",
         re.compile(
-            r"(?i)\b(?:assistant|chatgpt|AI agent|language model)[,:!]\s*"
-            r"(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|system|developer)\b"
+            r"(?i)\b(?:(?:rules?|polic(?:y|ies)|instructions?)\s+for\s+"
+            r"(?:AI\s+readers|(?:automated\s+)?assistants?|AI\s+agents?|"
+            r"language\s+models?)|(?:site|website|page|source)\s+policy)"
+            r"\s*:\s*(?:you\s+must\s+)?"
+            r"(?:ignore|disregard|override|disable|bypass|supersede)\b"
+        ),
+    ),
+    (
+        "citation_spoof",
+        re.compile(
+            r"(?i)\b(?:citation|evidence|source)\s+(?:override|directive|instruction)"
+            r"\s*:\s*(?:cite|present|treat|describe|report)\b"
+        ),
+    ),
+    (
+        "html_comment_directive",
+        re.compile(rf"(?i)<!--\s*{_AGENT_COMMAND}"),
+    ),
+    (
+        "structured_instruction",
+        re.compile(
+            r'''(?i)\b(?:assistant|agent|system|developer)[_-]instructions?'''
+            r'''(?:\\?["'])?\s*:\s*(?:\\?["'])?\s*'''
+            rf"(?:please\s+)?{_ACTION}\b"
+        ),
+    ),
+    (
+        "multilingual_override",
+        re.compile(
+            r"(?i)\b(?:(?:instrucci[oó]n(?:es)?|[oó]rdenes?)\s+para\s+"
+            r"(?:el|la|los|las)\s+(?:asistentes?|agentes?)|"
+            r"para\s+(?:el|la)\s+asistente|asistente)\s*[:,!]\s*"
+            r"(?:ignora|omite|desobedece|olvida|descarta|anula|no\s+sigas)\b"
         ),
     ),
 )
 
 
 def screen_text(text: Any) -> tuple[str, ...]:
-    """Return closed-set warnings; examine full bounded text before truncation."""
+    """Return lexical warnings, not a clean/safe verdict, over bounded text.
+
+    NFKC and format-control removal are shared by every caller of this screen.
+    Both raw input and normalized expansion are capped before regex scanning.
+    We never suppress quoted spans based on a page's claims: the narrow bare
+    override boundary preserves ordinary inline quotations, but explicit agent
+    commands/role tokens inside training examples can still warn. Arbitrary
+    encodings, homoglyphs, implicit intent and other languages remain bypasses.
+    Warnings cannot authorize tools or replace an owned enforcement boundary.
+    """
     if not isinstance(text, str):
         return ()
     if len(text) > MAX_TEXT:
         return ("screen_limit",)
     normalized = unicodedata.normalize("NFKC", text)
+    if len(normalized) > MAX_TEXT:
+        return ("screen_limit",)
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Cf")
     return tuple(name for name, pattern in _PATTERNS if pattern.search(normalized))
 
