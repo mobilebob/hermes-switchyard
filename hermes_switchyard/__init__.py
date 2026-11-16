@@ -13,6 +13,7 @@ from typing import Any
 
 from . import receipt_history, receipt_state, schemas
 from .automatic import _config_float, build_pre_llm_call_hook, discover_mandatory_skills
+from .combined_decisions import SharedDecisionBroker, SharedSkillClient, wrap_skill_pre_hook
 from .client import (
     DEFAULT_AUTOMATIC_ROUTING_DEADLINE_SECONDS,
     DEFAULT_ENDPOINT,
@@ -33,6 +34,8 @@ from .egress import (
 )
 from .model_policy import recommend_approved_model
 from .model_route_adapter import register_model_route_adapter
+from .model_routing_shadow import ModelRoutingShadow
+from .memory_screening import MemoryScreenShadow
 from .reasoning_effort_adapter import (
     DEFAULT_ADAPTIVE_REASONING_DEADLINE_SECONDS,
     append_effort_record,
@@ -53,6 +56,7 @@ _UNREGISTERED_RUNTIME_STATUS = {
     "consumer_mode": None,
     "public_or_sanitized_data_ack": None,
     "automatic_skill_jev_mode": None,
+    "shared_jev_skill_effort": False,
     "hosted_construction_allowed": False,
     "model_route_adapter": None,
     "reasoning_effort_adapter": None,
@@ -121,6 +125,9 @@ def _publish_runtime_status(
             ),
             "hosted_construction_allowed": bool(mode == "hosted_sanitized" and ack),
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
+            "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
+            "web_screen": _RUNTIME_STATUS.get("web_screen", {"mode": "off", "applied": False, "filter_available": False}),
+            "memory_screen": _RUNTIME_STATUS.get("memory_screen", {"mode": "off", "applied": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
         }
@@ -1046,6 +1053,9 @@ def _cli_handler(args):
             "automatic_skill_jev_mode": _RUNTIME_STATUS["automatic_skill_jev_mode"],
             "hosted_construction_allowed": _RUNTIME_STATUS["hosted_construction_allowed"],
             "model_route_adapter": _RUNTIME_STATUS.get("model_route_adapter"),
+            "model_routing_shadow": _RUNTIME_STATUS.get("model_routing_shadow", {"mode": "off", "apply_available": False}),
+            "web_screen": _RUNTIME_STATUS.get("web_screen", {"mode": "off", "applied": False, "filter_available": False}),
+            "memory_screen": _RUNTIME_STATUS.get("memory_screen", {"mode": "off", "applied": False}),
             "reasoning_effort_adapter": _RUNTIME_STATUS.get("reasoning_effort_adapter"),
             "defer_tool_schemas": _RUNTIME_STATUS.get("defer_tool_schemas"),
             "tool_exposure": exposure,
@@ -1696,14 +1706,30 @@ def register(ctx):
 
     from .output_pruning import OutputCompactionGuard
     from .stuck_detection import StuckDetector
+    from .web_screening import WebScreenShadow
+    web_shadow = (
+        WebScreenShadow(
+            mode="shadow", client_factory=client, identity_factory=cache_identity,
+            consent_factory=lambda: setting_bool("public_or_sanitized_data_ack", True)
+            and ctx_get_config(ctx, "web_screen_mode", default="off") == "shadow",
+            policy_factory=lambda: ctx_get_config(ctx, "web_screen_policy", default={})
+            if setting_bool("public_or_sanitized_data_ack", True)
+            and ctx_get_config(ctx, "web_screen_mode", default="off") == "shadow" else {},
+        ) if standing_ack and ctx_get_config(ctx, "web_screen_mode", default="off") == "shadow" else None
+    )
     if callable(getattr(ctx, "register_hook", None)):
         pruning = setting_bool("repeated_output_compaction", False)
         stuck = StuckDetector(client) if standing_ack and setting_bool("cross_tool_stuck_detection", False) else None
         output_guard = OutputCompactionGuard() if pruning else None
         if pruning:
             ctx.register_hook("pre_llm_call", output_guard.capture)
-        if pruning or stuck:
+        if pruning or stuck or web_shadow is not None:
             def transform_result(**kwargs):
+                if web_shadow is not None:
+                    try:
+                        web_shadow(**kwargs)  # Observation only; never consume a replacement.
+                    except Exception:
+                        pass  # Observer failure cannot replace the native tool result.
                 advice = stuck(**kwargs) if stuck is not None and setting_bool("cross_tool_stuck_detection", False) and setting_bool("public_or_sanitized_data_ack", True) else None
                 return advice if advice is not None else output_guard.prune(**kwargs) if output_guard is not None else None
             ctx.register_hook("transform_tool_result", transform_result)
@@ -1734,6 +1760,77 @@ def register(ctx):
         # Unset profiles inherit the install default (hosted_sanitized). The
         # legacy automatic_skill_jev boolean never authorizes egress by itself.
         configured_routing_mode = DEFAULT_ROUTING_MODE
+    # Off by default. Both consumers must be active and authorize the same
+    # public/sanitized hosted task before even attempting request sharing.
+    shared_jev_skill_effort = (
+        setting_bool("shared_jev_skill_effort", False)
+        and setting_bool("automatic_skill_recommendation", True)
+        and setting_bool("adaptive_reasoning_effort", True)
+        and configured_routing_mode == "hosted_sanitized"
+        and ctx_get_config(ctx, "automatic_skill_consumer_mode", default=DEFAULT_CONSUMER_MODE) == "load"
+        and setting_bool(
+            "automatic_skill_public_or_sanitized_data_ack",
+            DEFAULT_AUTOMATIC_PUBLIC_OR_SANITIZED_DATA_ACK,
+        )
+        and standing_ack
+    )
+    shadow_mode = ctx_get_config(ctx, "model_routing_mode", default="off")
+    model_shadow = (
+        ModelRoutingShadow(
+            mode=shadow_mode, identity_factory=cache_identity,
+            registry_factory=lambda: (
+                ctx_get_config(ctx, "approved_model_registry", default=[]),
+                ctx_get_config(ctx, "approved_model_registry_version", default=""),
+                ctx_get_config(ctx, "approved_model_registry_valid_until", default=""),
+            ),
+        )
+        if shadow_mode in ("shadow", "apply") and standing_ack
+        and setting_bool("adaptive_reasoning_effort", True) else None
+    )
+    memory_shadow = (
+        MemoryScreenShadow(
+            mode="shadow", identity_factory=cache_identity,
+            policy_factory=lambda: ctx_get_config(ctx, "memory_screen_policy", default={}),
+        ) if ctx_get_config(ctx, "memory_screen_mode", default="off") == "shadow" and standing_ack else None
+    )
+    shared_broker = SharedDecisionBroker(identity_factory=cache_identity) if shared_jev_skill_effort else None
+    owners = [owner for owner in (shared_broker, model_shadow, memory_shadow, web_shadow) if owner is not None]
+    def invalidate_decisions(**context):
+        for owner in owners:
+            owner.invalidate(**context)
+    if owners:
+        try:
+            # Invalidation only: no second decision or request-mutation owner.
+            for name in ("agent_loop_stopped", "on_session_end", "on_session_reset"):
+                ctx.register_hook(name, invalidate_decisions)
+            if callable(getattr(ctx, "on_unload", None)):
+                ctx.on_unload(invalidate_decisions)
+        except Exception:  # Without cancellation cleanup, sharing is unsafe.
+            invalidate_decisions()
+            shared_broker = None
+            model_shadow = None
+            if web_shadow is not None:
+                web_shadow.hosting_available = False
+                web_shadow.status["reason"] = "lifecycle_unavailable"
+            if memory_shadow is not None:
+                memory_shadow.hosting_available = False
+                memory_shadow.status["reason"] = "lifecycle_unavailable"
+    if memory_shadow is not None:
+        try:
+            ctx.register_middleware("tool_execution", memory_shadow.bind_native_scope)
+            memory_shadow.status["scope_bridge"] = True
+        except (AttributeError, TypeError, ValueError):
+            # Older native hosts still fall back locally when their handler
+            # context lacks a complete scope; no inferred turn identity.
+            memory_shadow.status["scope_bridge"] = False
+    auto_client_factory = (
+        (lambda: SharedSkillClient(client(), shared_broker))
+        if shared_broker is not None else client
+    )
+    _RUNTIME_STATUS["shared_jev_skill_effort"] = shared_broker is not None
+    _RUNTIME_STATUS["web_screen"] = web_shadow.status if web_shadow else {"mode": "off", "applied": False, "filter_available": False, "last_receipt": None}
+    _RUNTIME_STATUS["memory_screen"] = memory_shadow.status if memory_shadow else {"mode": "off", "applied": False, "last_receipt": None}
+    _RUNTIME_STATUS["model_routing_shadow"] = model_shadow.status if model_shadow else {"mode": "off", "apply_available": False, "last_receipt": None}
     automatic_hook = build_pre_llm_call_hook(
         enabled=setting_bool("automatic_skill_recommendation", True),
         configured_candidates=ctx_get_config(ctx, "automatic_skill_candidates", default=[]),
@@ -1743,7 +1840,7 @@ def register(ctx):
             "automatic_skill_public_or_sanitized_data_ack",
             DEFAULT_AUTOMATIC_PUBLIC_OR_SANITIZED_DATA_ACK,
         ),
-        client_factory=client,
+        client_factory=auto_client_factory,
         cache_identity=cache_identity,
         local_threshold=_config_float(
             ctx_get_config(ctx, "automatic_skill_local_threshold", default=0.20),
@@ -1803,7 +1900,11 @@ def register(ctx):
         automatic_skill_jev_mode=ctx_get_config(ctx, "automatic_skill_jev_mode", default="always"),
     )
     if automatic_hook is not None and hasattr(ctx, "register_hook"):
-        ctx.register_hook("pre_llm_call", automatic_hook)
+        ctx.register_hook(
+            "pre_llm_call",
+            wrap_skill_pre_hook(automatic_hook, shared_broker)
+            if shared_broker is not None else automatic_hook,
+        )
 
 
     # Hermes 0.19 has no model-selection apply seam. Register a safe no-op (or
@@ -1841,6 +1942,8 @@ def register(ctx):
         receipt_mode=ctx_get_config(ctx, "adaptive_reasoning_effort_receipt_mode", default=None),
         receipt_line=ctx_get_config(ctx, "adaptive_reasoning_effort_receipt_line", default=None),
         register_llm_request=(not defer_schemas_enabled),
+        shared_decisions=shared_broker,
+        model_shadow=model_shadow,
     )
 
     from . import reasoning_effort_adapter as _effort_mod
@@ -1973,6 +2076,10 @@ def register(ctx):
     def approved_route_handler(args, **kwargs):
         try:
             _require_public_data_ack(args, standing=standing_ack)
+            ticket = model_shadow.safely("begin",
+                task=str(args.get("task") or ""), context=kwargs,
+                consent=_resolved_public_data_ack(args, standing_ack),
+            ) if model_shadow else None
             result = recommend_approved_model(
                 task=str(args.get("task") or ""),
                 requirements=dict(args.get("requirements") or {}),
@@ -1985,6 +2092,8 @@ def register(ctx):
                 ),
                 public_or_sanitized_data_ack=_resolved_public_data_ack(args, standing_ack),
             )
+            if model_shadow:
+                model_shadow.safely("offer", ticket, result)
             return json.dumps(result)
         except Exception as exc:  # noqa: BLE001 -- tool handlers return structured errors
             return _error(exc)
@@ -2012,6 +2121,7 @@ def register(ctx):
                 return json.dumps(
                     rerank_session_search(
                         retrieved_screen_enabled=setting_bool("retrieved_screen_enabled", False),
+                        memory_shadow=memory_shadow, memory_context=kwargs,
                         candidates=candidates,
                         query=query,
                         client=None,
@@ -2027,6 +2137,7 @@ def register(ctx):
                 return json.dumps(
                     rerank_session_search(
                         retrieved_screen_enabled=setting_bool("retrieved_screen_enabled", False),
+                        memory_shadow=memory_shadow, memory_context=kwargs,
                         query=query,
                         candidates=candidates,
                         client=active_client,

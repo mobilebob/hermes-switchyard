@@ -18,18 +18,13 @@ plugin context. Do not patch Hermes core to make the plugin work.
 Stable names: manifest `hermes-switchyard`, root `__init__.py`,
 package `hermes_switchyard`.
 
-## Signed commits
+## Local commits and publication
 
-Every commit on hermes-switchyard must be signed, and GitHub must verify
-it, before it is pushed. Do not push a commit whose verification is
-missing or anything other than valid.
-
-Confirm with the commit verification API. For each SHA on the branch:
-
-`gh api repos/bgrablin/hermes-switchyard/commits/<sha> --jq .commit.verification`
-
-`verified` must be `true` and `reason` must be `valid`. A local `git`
-good signature is not enough.
+Owner policy: Git commit signing is not required for this project. Unsigned
+local checkpoints are allowed. If local Git configuration enforces signing,
+override it for that commit only; do not change global configuration or create
+signing credentials. Do not push or update a remote PR until the owner has
+reviewed the implementation and test results.
 
 ## Pull requests
 

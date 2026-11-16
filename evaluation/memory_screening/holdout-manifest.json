@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "file": "holdout.json",
+  "sha256": "519506a5920922317015dd33c266701a7d3d35bd2558b859e1e000c56af38d57",
+  "cases": 32,
+  "frozen_before_holdout_runner": true,
+  "labels_independent_of_transport_fixture": true,
+  "provider_evidence": "none; deterministic protocol transport only",
+  "groups": {"benign": 10, "attack": 10, "privacy": 7, "irrelevant": 4, "bounds": 1}
+}

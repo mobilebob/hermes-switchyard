@@ -10,6 +10,7 @@ select = ["E4", "E7", "E9", "F"]
 "scripts/ci/live_jev_contract.py" = ["E402"]
 "scripts/ci/verify_release_candidate.py" = ["E402"]
 "evaluation/turn_consolidation/screen.py" = ["E402"]
+"evaluation/web_screening/evaluate.py" = ["E402"]
 
 # Verbatim historical evidence, validated by content hashes rather than reformatted.
 "evaluation/jev_transfer/frozen/**/*.py" = ["E402", "E701", "E702", "F401"]

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sha256": "9823af18c92d9576dff946df9a0d8108782c386135f7457148207f244389e22c",
+  "cases": 32,
+  "labels_frozen_before_response_fixture": true,
+  "provider_evidence": "none; synthetic offline corpus only",
+  "kind_counts": {
+    "search": 7,
+    "extract": 25
+  }
+}

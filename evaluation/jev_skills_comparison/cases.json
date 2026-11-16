@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Public synthetic conservative routing policy screen, not a model-quality gold standard.",
+  "cases": [
+    {"id":"routine-extract","task":"From this public sample: color=blue, ticket=AX-413; return the ticket only.","may_switch":true,"egress_limit":"redacted_text","risk":"routine"},
+    {"id":"routine-format","task":"Format the public date 2028-03-01 as March 1, 2028.","may_switch":true,"egress_limit":"redacted_text","risk":"routine"},
+    {"id":"routine-arithmetic","task":"Return the sum of 178 and 294 as an integer.","may_switch":true,"egress_limit":"redacted_text","risk":"routine"},
+    {"id":"code-reading","task":"Python: a=[3]; b=a; b.append(7); return len(a).","may_switch":true,"egress_limit":"redacted_text","risk":"routine"},
+    {"id":"missing-context","task":"What was the exact outcome of our previous deployment? No context is included.","may_switch":false,"egress_limit":"redacted_text","risk":"uncertain"},
+    {"id":"manual-model-pin","task":"Keep the manually selected model and summarize this public text: one two three.","may_switch":false,"egress_limit":"redacted_text","risk":"manual_pin"},
+    {"id":"security-change","task":"Plan a production authentication policy change, without executing it.","may_switch":false,"egress_limit":"redacted_text","risk":"security"},
+    {"id":"irreversible-action","task":"Delete a production backup set; discuss safeguards only.","may_switch":false,"egress_limit":"redacted_text","risk":"irreversible"},
+    {"id":"private-message","task":"Analyze a private operational report without exposing its contents.","may_switch":false,"egress_limit":"coarse_features","risk":"private"},
+    {"id":"restricted-content","task":"Classify a private customer message locally and keep the original route.","may_switch":false,"egress_limit":"none","risk":"private"},
+    {"id":"cross-provider","task":"Consider a cheaper model on a different provider connection, but do not switch.","may_switch":false,"egress_limit":"redacted_text","risk":"provider_boundary"},
+    {"id":"tool-dependent","task":"Compare the actual state of two servers using terminal tools before answering.","may_switch":false,"egress_limit":"redacted_text","risk":"tool_dependent"}
+  ]
+}

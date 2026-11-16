@@ -54,6 +54,39 @@ tests, CI coverage, and honest evaluation claims. Keep this guidance aligned wit
 the contracts above and `SECURITY.md`. Sourcery's pull-request review controls
 remain in its dashboard; its legacy YAML does not configure those controls.
 
+## Offline memory-screen qualification
+
+Keep the new memory corpus separate from historical evaluation ledgers. Do not
+reset or replay those ledgers. The frozen labels and SHA-256 manifest are under
+`evaluation/memory_screening/`; the lexical transport is blind to labels/IDs and
+is deliberately not a Jev-quality measurement. With a scratch output path:
+
+```text
+python -m unittest discover -s tests -p 'test_memory*.py' -v
+python evaluation/memory_screening/holdout.py --output /path/to/scratch/memory-holdout.json
+python -m unittest discover -s tests -p 'test_shared_jev_native.py' -v
+```
+
+Native lifecycle checks require a native Hermes test environment. Run with a
+disposable `HOME`/`HERMES_HOME`, `HERMES_PROFILE=default`, no production auth files
+and blocked external sockets; the native workers also refuse socket connections.
+They install a release archive into disposable state and use a deterministic
+transport, never live Jev. An actual native tool-dispatch case qualifies the
+public tool-execution scope bridge; synthetic provider responses are not live
+quality/latency/billing evidence. Finish with the full regression suite and an
+archive built from the exact committed revision. Keep all new features default-off.
+
+## Offline web-screen qualification
+
+The independent frozen corpus and integrity manifest live under
+`evaluation/web_screening/`. Do not change labels to improve fixture scores.
+Run `python -m unittest discover -s tests -p 'test_web_screen*.py' -v`,
+then `python evaluation/web_screening/evaluate.py --output /path/to/scratch/web-holdout.json`.
+The evaluator uses a label-blind lexical response fixture, not live Jev.
+Packaged web lifecycle tests use disposable native homes and blocked sockets.
+Finish with the complete suite and exact-commit release verification, as for
+memory screening. No live quality, latency or cost claims follow from fixtures.
+
 ## Pull requests
 
 In the description:

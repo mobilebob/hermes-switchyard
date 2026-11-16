@@ -548,7 +548,10 @@ class DecisionClient:
         max_requests: int = MAX_DECISION_REQUESTS,
         *,
         deadline_seconds: float | None = None,
+        max_transport_retries: int = MAX_OPERATION_RETRIES,
     ):
+        if type(max_transport_retries) is not int or not 0 <= max_transport_retries <= MAX_OPERATION_RETRIES:
+            raise ValueError("transport retry budget is outside the bounded operation budget")
         if type(max_requests) is not int or not 1 <= max_requests <= MAX_OPERATION_REQUESTS:
             raise ValueError("max_requests is outside the bounded operation budget")
         if deadline_seconds is not None and (
@@ -562,7 +565,7 @@ class DecisionClient:
             yield
             return
         token = self._request_budget.set(max_requests)
-        retry_token = self._retry_budget.set([MAX_OPERATION_RETRIES])
+        retry_token = self._retry_budget.set([max_transport_retries])
         deadline_token = self._operation_deadline.set(
             time.monotonic() + float(deadline_seconds)
             if deadline_seconds is not None

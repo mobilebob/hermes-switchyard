@@ -168,6 +168,7 @@ def recommend_approved_model(
         "latency_ms": routed.get("latency_ms"),
         "usage": routed.get("usage") or {},
         "request_count": routed.get("request_count"),
+        "request_id": routed.get("request_id"),
         "abstention_reason": None,
     })
     return result

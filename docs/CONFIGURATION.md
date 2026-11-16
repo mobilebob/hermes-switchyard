@@ -34,6 +34,17 @@ An empty string (`""`) or empty list (`[]`) means "nothing configured." The defa
 | Hide the `Reasoning: …` line under replies | `adaptive_reasoning_effort_receipt_mode` | `off` |
 | Use a specific Jev provider | `jev_provider` | `typesafe` or `openrouter` |
 
+## Web screening shadow
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `web_screen_mode` | `off` | Only `shadow` is implemented. Observes public snippets/pages through the existing result owner; never changes results or safety decisions. |
+| `web_screen_policy` | `{}` | Operator-owned exact question/source approvals, profile and public unauthenticated access. Empty or unknown policy keeps content local. |
+
+See [WEB-SCREENING-SHADOW.md](WEB-SCREENING-SHADOW.md) for the policy contract,
+privacy boundaries, request accounting and offline qualification limits.
+Automatic content filtering is unavailable; this is not an activation guide.
+
 ## Provider and connection
 
 | Key | Default | What it does |

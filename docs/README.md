@@ -23,6 +23,8 @@ Find the right page for what you want to do. Pages near the top are for everyone
 | [Automatic source prefetch](SOURCE-FINDER.md) | Finds an exact passage in a file you name | No (opt-in pilot) |
 | [Approved model routing](MODEL-ROUTING.md) | Recommends a model from your approved list; never switches | Tool only; advisory |
 | [Session search re-rank](SESSION-SEARCH-RERANK.md) | Reorders past-session search results | Tool only |
+| [Memory screening shadow](MEMORY-SCREENING-SHADOW.md) | Observes relevance/injection inside approved retrieval requests; never applies scores | No |
+| [Web screening shadow](WEB-SCREENING-SHADOW.md) | Observes public snippets/pages without changing results or safety decisions | No |
 | [Skill description lint](LINT-SKILLS.md) | Flags skills whose descriptions are too similar to tell apart | Command only |
 | [Local observation report (`wow`)](WOW-LOCAL-REPORT.md) | Summarizes what Switchyard recorded on this machine | Command only |
 | [Offline outcome labels](OUTCOME-LABELS.md) | Labels retained receipts for offline analysis (new in 0.6.0) | Command only |

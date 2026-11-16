@@ -1,0 +1,9 @@
+{
+  "scope": "synthetic-offline-only",
+  "provider": "fixture",
+  "current": "fixture:large",
+  "models": [
+    {"id": "small", "model": "small", "approved": true, "description": "Synthetic small general model; not a quality claim or real endpoint", "cost": 1, "context_limit": 32768},
+    {"id": "large", "model": "large", "approved": true, "description": "Synthetic current general model; not a real endpoint", "cost": 5, "context_limit": 32768}
+  ]
+}
