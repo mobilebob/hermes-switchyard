@@ -15,7 +15,7 @@ QUESTION = {"answer": {"type": "noul", "instructions": "Is this public example t
 
 def client_for(requested, resolved, endpoint=TYPESAFE_ENDPOINT):
     return DecisionClient(
-        api_key="synthetic-test-key",
+        api_key="fixture-key-value",
         endpoint=endpoint,
         model=requested,
         transport=lambda payload: {
@@ -61,7 +61,7 @@ class TypeSafeModelResolutionTests(unittest.TestCase):
         self.assertEqual(len(observed.output), 2)
         self.assertIn("jev-1.15.0", observed.output[0])
         self.assertIn("jev-2.0.0", observed.output[1])
-        self.assertNotIn("synthetic-test-key", " ".join(observed.output))
+        self.assertNotIn("fixture-key-value", " ".join(observed.output))
 
     def test_future_explicit_pin_is_not_implicitly_approved(self):
         with self.assertRaisesRegex(ValueError, "not an evidence-backed allowed alias"):

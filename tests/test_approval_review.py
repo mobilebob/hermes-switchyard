@@ -643,7 +643,9 @@ class ApprovalScopeTests(unittest.TestCase):
                 result = pre_tool_gate(tool_name="terminal", args={"command": command})
                 assert result is not None
                 self.assertNotIn(secret, result["message"])
-                self.approval_previews(command, expected=expected, canaries=(secret,))
+                self.assert_verified_preview("terminal", {"command": command},
+                                             "irreversible_operation", "command", (secret,),
+                                             allow_normal=expected == "withheld" and name in ('comment nested JSON', 'comment twice-nested JSON', 'curl api key', 'curl password', 'echo JSON', 'heredoc nested JSON'))
 
     def test_escaped_credential_controls_keep_display_outcomes(self):
         secret = "orch" + "id"
@@ -750,8 +752,8 @@ class ApprovalScopeTests(unittest.TestCase):
             field = "code" if tool == "execute_code" else "command"
             args = {field: text}
             with self.subTest(case=name):
-                self.assert_withheld_preview(tool, args, "irreversible_operation", field, (secret,))
-                result = pre_tool_gate(tool_name=tool, args=args)
+                result = self.assert_verified_preview(tool, args, "irreversible_operation", field,
+                                                      (secret,), allow_normal=name in {'closed-marker-heredoc', 'dollar-parens-heredoc', 'backtick-heredoc', 'dollar-single', 'closed-marker-single', 'dollar-parens-single', 'open-marker-single', 'asterisks-heredoc', 'ordinary-single', 'dollar-heredoc', 'dollar-comment', 'asterisks-comment', 'closed-marker-comment', 'ordinary-comment', 'open-marker-comment', 'ordinary-heredoc', 'asterisks-single', 'dollar-parens-comment', 'backtick-comment', 'backtick-single', 'open-marker-heredoc'})
                 self.assertNotIn(secret, result["message"])
                 for surface in ("cli", "gateway"):
                     with self.subTest(surface=surface), patch.object(
@@ -768,8 +770,12 @@ class ApprovalScopeTests(unittest.TestCase):
                         self.assertFalse(decision["approved"])
                         self.assertEqual(len(captured), before + 1)
                         self.assertNotIn(secret, captured[-1])
-                        self.assertIn("Input and target withheld", captured[-1])
-                        self.assertIn("only to this invocation", captured[-1])
+                        if ":uninspectable:" in result["rule_key"]:
+                            self.assertIn("Input and target withheld", captured[-1])
+                            self.assertIn("only to this invocation", captured[-1])
+                        else:
+                            self.assertIn("identical input", captured[-1])
+                            self.assertIn("irreversible_operation", captured[-1])
                 self.assertEqual(args, {field: text})
 
     def test_cut_marker_text_in_paths_is_data(self):
@@ -1069,6 +1075,45 @@ class ApprovalScopeTests(unittest.TestCase):
                     Counter(m.group().lower() for m in pattern.finditer(raw)) -
                     Counter(m.group().lower() for m in pattern.finditer(shown)), display,
                 )
+
+    def assert_verified_preview(self, tool, args, category, field, canaries=(), *, allow_normal=False):
+        """A proven complete mask may use exact-input binding, never an unscoped grant."""
+        import hashlib
+
+        original = dict(args)
+        first = pre_tool_gate(tool_name=tool, args=args)
+        repeat = pre_tool_gate(tool_name=tool, args=args)
+        assert first is not None and repeat is not None
+        if not allow_normal or ":uninspectable:" in first["rule_key"]:
+            self.assert_withheld_preview(tool, args, category, field, canaries)
+            return first
+        encoded = json.dumps(args, sort_keys=True, ensure_ascii=True, allow_nan=False,
+                             separators=(",", ":"))
+        expected = "switchyard:" + tool + ":consequential:" + hashlib.sha256(encoded.encode()).hexdigest()
+        self.assertEqual(first["rule_key"], expected)
+        self.assertEqual(repeat["rule_key"], expected)
+        self.assertEqual(first["action"], "approve")
+        self.assertEqual(repeat["action"], "approve")
+        self.assertIn("identical input", first["message"])
+        self.assert_display_indicators(first["message"], args[field], tool, category, field, canaries)
+        # Independently decode JSON/string escapes through all bounded nested layers.
+        for display in (first["message"], *self.display_texts(first["message"])):
+            for _ in range(16):
+                for canary in canaries:
+                    self.assertNotIn(canary, display)
+                decoded = re.sub(r'\\(?:u[0-9a-fA-F]{4}|["\\/bfnrt])',
+                                 lambda m: json.loads('"' + m.group() + '"'), display)
+                if decoded == display:
+                    break
+                display = decoded
+        changed = dict(args)
+        changed[field] += "\n# altered synthetic invocation"
+        other = pre_tool_gate(tool_name=tool, args=changed)
+        assert other is not None
+        self.assertEqual(other["action"], "approve")
+        self.assertNotEqual(first["rule_key"], other["rule_key"])
+        self.assertEqual(args, original)
+        return first
 
     def assert_withheld_preview(self, tool, args, category, field, canaries=()):
         original = dict(args)
