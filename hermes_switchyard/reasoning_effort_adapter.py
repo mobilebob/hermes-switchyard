@@ -1456,6 +1456,8 @@ class _SessionEffortState:
         "choice_effort",
         "choice_cap",
         "choice_token",
+        "choice_route",
+        "choice_stakes",
         "jev_calls",
         "requests",
         "round_kinds",
@@ -1500,6 +1502,8 @@ class _SessionEffortState:
         self.choice_cap: str | None = None
         # Identity of the captured current-turn message the cached choice used.
         self.choice_token: int | None = None
+        self.choice_route: tuple[Any, ...] | None = None
+        self.choice_stakes: float | None = None
         self.jev_calls = 0
         self.requests = 0
         # Step-level state. A tool round is the tool calls between two model requests.
@@ -2665,10 +2669,32 @@ class ReasoningEffortController:
             jev_called = False
             capture = self._captured_task(session_id=session_id, task_id=task_id, turn_id=turn_id)
             token = capture.get("token") if capture is not None else None
+            route_key = (
+                str(provider or "").strip().lower(), model_key,
+                str(api_mode or "").strip().lower(), requested, tuple(candidates),
+            )
             stale_choice = state.choice_effort is not None and state.choice_effort not in candidates
+            route_changed = state.choice_route is not None and state.choice_route != route_key
+            stakes_changed = state.choice_effort is not None and state.choice_stakes != state.turn_stakes
             # A local choice holds only until a tool runs: then the turn is no longer trivial.
             local_expired = state.choice_local and closed is not None
-            if state.dirty or stale_choice or local_expired or state.choice_cap != cap or state.choice_token != token:
+            if (
+                state.dirty and not self.allow_raise and not state.choice_local
+                and self.public_or_sanitized_data_ack and all(route_key[:3])
+                and closed is not None and closed["kinds"] == ["read"] and not state.turn_wrote
+                and not route_changed and not stakes_changed
+                and capture is not None and token is not None and not capture.get("scan_reason")
+                and state.choice_token == token and state.choice_cap == cap
+                and state.choice_route == route_key and state.choice_effort == cap
+                and state.turn_stakes is not None
+                and state.turn_stakes >= STAKES_VETO_THRESHOLD
+            ):
+                # Only read-tool status flips may retain the confirmed high-stakes cap.
+                # Missing identity, writes/exec, changed stakes, captures, routes, caps
+                # and turns never qualify for this optimization. No task/result text
+                # is added to the key or sent to the provider.
+                state.dirty = False
+            if state.dirty or stale_choice or route_changed or stakes_changed or local_expired or state.choice_cap != cap or state.choice_token != token:
                 state.step_choice = None
                 state.choice_local = False
                 if (
@@ -2686,6 +2712,8 @@ class ReasoningEffortController:
                     state.choice_effort = effort
                     state.choice_local = True
                     state.turn_stakes = None
+                    state.choice_route = route_key
+                    state.choice_stakes = None
                     state.rounds_since_ask = 0
                     state.turn_decisions.append(effort)
                     receipt = {**base, "status": "selected", "reason_code": LOCAL_TRIVIAL_REASON}
@@ -2700,6 +2728,8 @@ class ReasoningEffortController:
                 state.dirty = False
                 state.choice_cap = cap
                 state.choice_token = token
+                state.choice_route = route_key
+                state.choice_stakes = None
                 state.rounds_since_ask = 0
                 if choice.get("reason_code") in _JEV_FAILURE_REASONS:
                     state.choice_effort = None
@@ -2727,7 +2757,9 @@ class ReasoningEffortController:
                     state.turn_stakes = None
                     return self._unchanged(state, reason="invalid_choice", requested=requested, base=base)
                 state.choice_effort = effort
+                state.choice_route = route_key
                 state.turn_stakes = _finite_or_none(choice.get("stakes"))
+                state.choice_stakes = state.turn_stakes
                 state.turn_decisions.append(effort)
                 receipt = {
                     **base,
